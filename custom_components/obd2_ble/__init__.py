@@ -75,7 +75,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
     api = Connection(
         transport=transport,
         auto_connect=False,
-        protocol=Protocol(entry.options.get(CONF_PROTOCOL, Protocol.AUTO)),
+        protocol=entry.data.get(CONF_PROTOCOL, Protocol.AUTO),
         log_handler=MISSING,
         log_formatter=MISSING,
         log_level=MISSING,

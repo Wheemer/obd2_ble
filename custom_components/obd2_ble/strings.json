@@ -6,30 +6,21 @@
         "description": "Please select your OBD-II Bluetooth device from the discovered list below.",
         "data": {
           "address": "Discovered Devices",
-          "auto_configure": "Attempt automatic profile detection (recommended)"
+          "auto_configure": "Attempt automatic profile detection (do not use, work in progress!)"
         }
       },
-      "service": {
-        "title": "Select GATT Service",
-        "description": "Select the communication service exposed by your OBD-II device adapter.",
-        "data": {
-          "service_uuid": "GATT Service UUID"
-        }
-      },
-      "characteristic": {
-        "title": "Configure Characteristics",
-        "description": "Choose the precise read and write characteristic channels to establish the serial connection link.",
+      "connection": {
+        "title": "Configure Connection",
+        "description": "Set up the Bluetooth connection parameters for your OBD-II device.",
         "data": {
           "characteristic_read_uuid": "Read (RX) Characteristic",
-          "characteristic_write_uuid": "Write (TX) Characteristic"
+          "characteristic_write_uuid": "Write (TX) Characteristic",
+          "protocol": "OBD2 Bus Architecture Standard"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Connection",
-        "description": "Adjust the Bluetooth configuration or serial channels for your existing hardware connection profile.",
-        "data": {
-          "service_uuid": "GATT Service UUID"
-        }
+        "description": "Adjust the Bluetooth configuration or serial channels for your existing hardware connection profile."
       }
     },
     "abort": {
@@ -48,7 +39,6 @@
         "description": "Please select which subsystem of your OBD-II integration profile you want to adjust.",
         "menu_options": {
           "polling": "Configure polling parameters & sleep states",
-          "protocol": "Forced OBD-II interface connection protocols",
           "commands": "Select monitored PIDs & command telemetry"
         }
       },
@@ -60,13 +50,6 @@
           "fast_poll": "Active/Ignition-On Polling Interval (seconds)",
           "slow_poll": "Idle/Engine-Off Polling Interval (seconds)",
           "xs_poll": "Out of Range/Extra-Slow Connection Sweep (seconds)"
-        }
-      },
-      "protocol": {
-        "title": "Force Connection Protocol",
-        "description": "If your vehicle network times out on default connection setups, select a hardcoded OBD-II target standard framework below.",
-        "data": {
-          "protocol": "OBD2 Bus Architecture Standard"
         }
       },
       "commands": {

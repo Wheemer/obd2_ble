@@ -43,11 +43,9 @@ from .const import (
     DEFAULT_CACHED_VALUES,
     DEFAULT_FAST_POLL,
     DOMAIN,
-    CONF_SERVICE_UUID,
     CONF_CHARACTERISTIC_UUID_READ,
     CONF_CHARACTERISTIC_UUID_WRITE,
     CONF_PROTOCOL,
-    DEFAULT_SERVICE_UUID,
     DEFAULT_CHARACTERISTIC_UUID_READ,
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
 )
@@ -82,9 +80,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovery_info: BluetoothServiceInfoBleak | None = None
         self._discovered_devices: dict[str, BluetoothServiceInfoBleak] = {}
         # self._discovered_devices: dict[str, DiscoveredDevice] = {}
-        self._service_uuid: str = DEFAULT_SERVICE_UUID
         self._characteristic_uuid_read: str = DEFAULT_CHARACTERISTIC_UUID_READ
         self._characteristic_uuid_write: str = DEFAULT_CHARACTERISTIC_UUID_WRITE
+        self._protocol: Protocol = Protocol.AUTO
 
         self._transport: TransportBLE | None = None
 
@@ -200,7 +198,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if user_input.get(CONF_AUTO_CONFIGURE, True):
                 if obdii_dev := await self._async_device_supported(self._discovery_info):
                     _LOGGER.debug("Auto-configuring device %s using class %s", self._discovery_info.name, obdii_dev.__name__)
-                    self._service_uuid = obdii_dev.uuid_service()
                     self._characteristic_uuid_read = obdii_dev.uuid_rx()
                     self._characteristic_uuid_write = obdii_dev.uuid_tx()
                     raise NotImplementedError("Auto-configuration based on device class is not fully implemented yet")
@@ -208,7 +205,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     _LOGGER.warning("Device %s does not match any known OBD2 classes, auto-configuration may fail", self._discovery_info.name)
 
-            return await self.async_step_service()
+            return await self.async_step_connection()
 
         if discovery := self._discovery_info:
             self._discovered_devices[discovery.address] = discovery
@@ -246,42 +243,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_service(
-        self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
-        """Manage the options."""
-
-        if user_input is not None:
-            self._service_uuid = user_input[CONF_SERVICE_UUID]
-            return await self.async_step_characteristic()
-        
-        assert self._transport is not None and self._transport.is_connected(), "Transport should have been initialized and connected by now"
-        service_collection = self._transport.get_service_collection()
-        for service in service_collection:
-            _LOGGER.debug("Discovered service: %s", service.uuid)
-            for characteristic in service.characteristics:
-                _LOGGER.debug("Discovered characteristic: %s", characteristic.uuid)
-
-        return self.async_show_form(
-            step_id="service",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SERVICE_UUID): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                {
-                                    "value": service.uuid,
-                                    "label": f"{service.description} {service.uuid.split('-')[0]}"
-                                } for service in service_collection],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                            translation_key="ble_services",
-                        )
-                    ),
-                }
-            )
-        )
-
-    async def async_step_characteristic(
+    async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Manage the options."""
@@ -291,6 +253,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._characteristic_uuid_read = user_input[CONF_CHARACTERISTIC_UUID_READ]
             self._characteristic_uuid_write = user_input[CONF_CHARACTERISTIC_UUID_WRITE]
+            self._protocol = Protocol(int(user_input[CONF_PROTOCOL]))
             if self._transport is not None and self._transport.is_connected():
                 await self._transport.async_close()
 
@@ -300,9 +263,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     reconfigure_entry,
                     data={
                         **reconfigure_entry.data,
-                        CONF_SERVICE_UUID: self._service_uuid,
                         CONF_CHARACTERISTIC_UUID_READ: self._characteristic_uuid_read,
                         CONF_CHARACTERISTIC_UUID_WRITE: self._characteristic_uuid_write,
+                        CONF_PROTOCOL: self._protocol,
                     },
                 )
 
@@ -311,27 +274,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 title= self._discovery_info.name,
                 data={
                     CONF_ADDRESS: self._discovery_info.address,
-                    CONF_SERVICE_UUID: self._service_uuid,
                     CONF_CHARACTERISTIC_UUID_READ: self._characteristic_uuid_read,
                     CONF_CHARACTERISTIC_UUID_WRITE: self._characteristic_uuid_write,
+                    CONF_PROTOCOL: self._protocol,
                 },
             )
         
         assert self._transport is not None and self._transport.is_connected(), "Transport should have been initialized and connected by now"
         characteristics: list[BleakGATTCharacteristic] = []
         for service in self._transport.get_service_collection():
-            if service.uuid == self._service_uuid:
-                _LOGGER.debug("Discovered service: %s", service.uuid)
-                characteristics = service.characteristics
-                break
+            characteristics.extend(service.characteristics)
         if not characteristics:
-            raise ValueError(f"No characteristics found for service: {self._service_uuid}")
+            raise ValueError(f"No characteristics found")
 
         return self.async_show_form(
-            step_id="characteristic",
+            step_id="connection",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_CHARACTERISTIC_UUID_READ, default=self._transport.config.get("uuid_read")): selector.SelectSelector(
+                    vol.Required(CONF_CHARACTERISTIC_UUID_READ, default=self._characteristic_uuid_read): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {
@@ -342,7 +302,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             translation_key="ble_read_characteristics",
                         )
                     ),
-                    vol.Required(CONF_CHARACTERISTIC_UUID_WRITE, default=self._transport.config.get("uuid_write")): selector.SelectSelector(
+                    vol.Required(CONF_CHARACTERISTIC_UUID_WRITE, default=self._characteristic_uuid_write): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {
@@ -353,17 +313,30 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             translation_key="ble_write_characteristics",
                         )
                     ),
+                    vol.Required(CONF_PROTOCOL, default=str(self._protocol.value)): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": str(protocol.value),
+                                    "label": f"{protocol.name} ({protocol.value})"
+                                } for protocol in Protocol if protocol != Protocol.UNKNOWN],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            translation_key="obdii_protocol",
+                        ),
+                    ),
                 }
             )
         )
 
     async def async_step_reconfigure(self, user_input: dict | None = None) -> config_entries.ConfigFlowResult:
-        # self._discovery_info = async_last_service_info(self.hass, self._get_reconfigure_entry().data[CONF_ADDRESS], connectable=True)
         self._transport = self._get_reconfigure_entry().runtime_data.api.transport
         assert self._transport is not None, "Transport should have been initialized by now"
         if not self._transport.is_connected():
             await self._transport.async_connect()
-        return await self.async_step_service(user_input)
+        self._characteristic_uuid_read = self._get_reconfigure_entry().data.get(CONF_CHARACTERISTIC_UUID_READ, DEFAULT_CHARACTERISTIC_UUID_READ)
+        self._characteristic_uuid_write = self._get_reconfigure_entry().data.get(CONF_CHARACTERISTIC_UUID_WRITE, DEFAULT_CHARACTERISTIC_UUID_WRITE)
+        self._protocol = self._get_reconfigure_entry().data.get(CONF_PROTOCOL, Protocol.AUTO)
+        return await self.async_step_connection(user_input)
 
     @callback
     def async_remove(self) -> None:
@@ -391,10 +364,9 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         # Clicking a button automatically calls async_step_<step_id>
         return self.async_show_menu(
             step_id="init",
-            menu_options=["polling", "protocol", "commands"],
+            menu_options=["polling", "commands"],
             description_placeholders={
                 "polling": "Configure polling intervals for different device states",
-                "protocol": "Select the OBD-II protocol to use",
                 "commands": "Configure custom OBD-II commands"
             }
         )
@@ -426,39 +398,6 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     vol.Required(
                         CONF_XS_POLL, default=self._options.get(CONF_XS_POLL, DEFAULT_XS_POLL)
                     ): int,
-                }
-            ),
-        )
-
-    async def async_step_protocol(
-        self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
-
-        if user_input is not None:
-            if user_input.get(CONF_PROTOCOL) is not None:
-                # user_input[CONF_PROTOCOL] = Protocol(int(user_input[CONF_PROTOCOL]))
-                user_input[CONF_PROTOCOL] = int(user_input[CONF_PROTOCOL])
-            self._options.update(user_input)
-            return self.async_create_entry(
-                title=self.config_entry.data.get(CONF_ADDRESS),
-                data=self._options,
-            )
-        
-        return self.async_show_form(
-            step_id="protocol",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_PROTOCOL, default=str(self._options.get(CONF_PROTOCOL, Protocol.AUTO.value))): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                {
-                                    "value": str(protocol.value),
-                                    "label": f"{protocol.name} ({protocol.value})"
-                                } for protocol in Protocol if protocol != Protocol.UNKNOWN],
-                            mode=selector.SelectSelectorMode.DROPDOWN,
-                            translation_key="obdii_protocol",
-                        ),
-                    ),
                 }
             ),
         )
