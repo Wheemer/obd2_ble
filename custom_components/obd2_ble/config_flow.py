@@ -18,6 +18,7 @@ from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
+from obdii import commands as obdii_commands
 from obdii.protocol import Protocol
 
 from homeassistant import config_entries
@@ -26,7 +27,7 @@ from homeassistant.components.bluetooth import (
     async_ble_device_from_address,
     async_discovered_service_info,
 )
-from homeassistant.const import CONF_ADDRESS, CONF_COMMAND
+from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry, selector
 
@@ -35,6 +36,7 @@ from .coordinator import DEFAULT_SLOW_POLL, DEFAULT_XS_POLL, Obd2BleDataUpdateCo
 from .const import (
     CONF_AUTO_CONFIGURE,
     CONF_CACHED_VALUES,
+    CONF_COMMANDS,
     CONF_FAST_POLL,
     CONF_SLOW_POLL,
     CONF_XS_POLL,
@@ -66,102 +68,6 @@ class DiscoveredDevice:
     def model(self) -> str:
         """Return BMS type in capital letters, e.g. 'DUMMY OBDII'."""
         return self.type.rsplit(".", 1)[1].replace("_", " ").upper()
-
-
-async def async_prepare_service_selection_schema(
-    transport: TransportBLE,
-) -> vol.Schema:
-    """Manage the options."""
-
-    service_collection = transport.get_service_collection()
-    for service in service_collection:
-        _LOGGER.debug("Discovered service: %s", service.uuid)
-        for characteristic in service.characteristics:
-            _LOGGER.debug("Discovered characteristic: %s", characteristic.uuid)
-
-    return vol.Schema(
-        {
-            vol.Required(CONF_SERVICE_UUID): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    # options=[{"value": k, "label": v} for k, v in service_map.items()],
-                    options=[
-                        {
-                            "value": service.uuid,
-                            "label": f"{service.description} {service.uuid.split('-')[0]}"
-                        } for service in service_collection],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="ble_services",
-                )
-            ),
-        }
-    )
-
-
-async def async_prepare_characteristic_selection_schema(
-    transport: TransportBLE,
-    service_uuid: str,
-) -> vol.Schema:
-    """Manage the options."""
-
-    characteristics: list[BleakGATTCharacteristic] = []
-    for service in  transport.get_service_collection():
-        if service.uuid == service_uuid:
-            _LOGGER.debug("Discovered service: %s", service.uuid)
-            characteristics = service.characteristics
-            break
-    if not characteristics:
-        raise ValueError(f"No characteristics found for service: {service_uuid}")
-    return vol.Schema(
-        {
-            vol.Required(CONF_CHARACTERISTIC_UUID_READ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        {
-                            "value": characteristic.uuid,
-                            "label": f"{characteristic.description} {characteristic.uuid.split('-')[0]}"
-                        } for characteristic in characteristics],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="ble_read_characteristics",
-                )
-            ),
-            vol.Required(CONF_CHARACTERISTIC_UUID_WRITE): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        {
-                            "value": characteristic.uuid,
-                            "label": f"{characteristic.description} {characteristic.uuid.split('-')[0]}"
-                        } for characteristic in characteristics],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="ble_write_characteristics",
-                )
-            ),
-        }
-    )
-
-
-async def async_prepare_command_selection_schema(
-    coordinator: Obd2BleDataUpdateCoordinator,
-) -> vol.Schema:
-    """Manage the options."""
-
-    pid, commands = await coordinator.async_get_all_pid_commands()
-
-    return vol.Schema(
-        {
-            vol.Required(CONF_COMMAND): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        {
-                            "value": command.name,
-                            "label": f"{command.name} {command.uuid.split('-')[0]}"
-                        } for command in commands],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="ble_services",
-                    multiple=True,
-                )
-            ),
-        }
-    )
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -350,9 +256,29 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_characteristic()
         
         assert self._transport is not None and self._transport.is_connected(), "Transport should have been initialized and connected by now"
+        service_collection = self._transport.get_service_collection()
+        for service in service_collection:
+            _LOGGER.debug("Discovered service: %s", service.uuid)
+            for characteristic in service.characteristics:
+                _LOGGER.debug("Discovered characteristic: %s", characteristic.uuid)
+
         return self.async_show_form(
             step_id="service",
-            data_schema=await async_prepare_service_selection_schema(self._transport)
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_SERVICE_UUID): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": service.uuid,
+                                    "label": f"{service.description} {service.uuid.split('-')[0]}"
+                                } for service in service_collection],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            translation_key="ble_services",
+                        )
+                    ),
+                }
+            )
         )
 
     async def async_step_characteristic(
@@ -392,9 +318,43 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         
         assert self._transport is not None and self._transport.is_connected(), "Transport should have been initialized and connected by now"
+        characteristics: list[BleakGATTCharacteristic] = []
+        for service in self._transport.get_service_collection():
+            if service.uuid == self._service_uuid:
+                _LOGGER.debug("Discovered service: %s", service.uuid)
+                characteristics = service.characteristics
+                break
+        if not characteristics:
+            raise ValueError(f"No characteristics found for service: {self._service_uuid}")
+
         return self.async_show_form(
             step_id="characteristic",
-            data_schema=await async_prepare_characteristic_selection_schema(self._transport, self._service_uuid)
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_CHARACTERISTIC_UUID_READ, default=self._transport.config.get("uuid_read")): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": characteristic.uuid,
+                                    "label": f"{characteristic.description} {characteristic.uuid.split('-')[0]}"
+                                } for characteristic in characteristics],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            translation_key="ble_read_characteristics",
+                        )
+                    ),
+                    vol.Required(CONF_CHARACTERISTIC_UUID_WRITE, default=self._transport.config.get("uuid_write")): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": characteristic.uuid,
+                                    "label": f"{characteristic.description} {characteristic.uuid.split('-')[0]}"
+                                } for characteristic in characteristics],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            translation_key="ble_write_characteristics",
+                        )
+                    ),
+                }
+            )
         )
 
     async def async_step_reconfigure(self, user_input: dict | None = None) -> config_entries.ConfigFlowResult:
@@ -508,16 +468,31 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
     ) -> config_entries.ConfigFlowResult:
 
         if user_input is not None:
-            # if user_input.get(CONF_PROTOCOL) is not None:
-            #     # user_input[CONF_PROTOCOL] = Protocol(int(user_input[CONF_PROTOCOL]))
-            #     user_input[CONF_PROTOCOL] = int(user_input[CONF_PROTOCOL])
-            self._options.update(user_input)
-            # return self.async_create_entry(
-            #     title=self.config_entry.data.get(CONF_ADDRESS),
-            #     data=self._options,
-            # )
+            # self._options.update(user_input)
+            self._options[CONF_COMMANDS] = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
+            return self.async_create_entry(
+                title=self.config_entry.data.get(CONF_ADDRESS),
+                data=self._options,
+            )
         
+        _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
+
         return self.async_show_form(
             step_id="commands",
-            data_schema=await async_prepare_command_selection_schema(self.config_entry.runtime_data),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_COMMANDS, default=[cmd.name for cmd in self._options.get(CONF_COMMANDS, [])]): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": command.name,
+                                    "label": f"{command.name} ({command.mode} {command.pid})"
+                                } for command in commands],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                            translation_key="ble_services",
+                            multiple=True,
+                        )
+                    ),
+                }
+            ),
         )

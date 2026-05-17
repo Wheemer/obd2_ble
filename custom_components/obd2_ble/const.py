@@ -18,6 +18,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 # Configuration and options
 CONF_AUTO_CONFIGURE = "auto_configure"
 CONF_CACHED_VALUES = "cached_values"
+CONF_COMMANDS = "commands"
 CONF_FAST_POLL = "fast_poll"
 CONF_SLOW_POLL = "slow_poll"
 CONF_XS_POLL = "xs_poll"

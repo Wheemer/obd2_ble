@@ -11,14 +11,11 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-# from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-# from homeassistant.const import EntityCategory
 
-from custom_components.obd2_ble import Obd2BleConfigEntry
-
+from . import Obd2BleConfigEntry
+from .const import CONF_COMMANDS
 from .coordinator import Obd2BleDataUpdateCoordinator
-# from .const import DOMAIN, NAME
 from .entity import ObdBleEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,27 +53,27 @@ SENSOR_TYPES: list[ObdSensorEntityConfig] = [
         # device_class=SensorDeviceClass.REVOLUTION_PER_MINUTE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    ObdSensorEntityConfig(
-        command=commands.CATALYST_TEMP_BANK_1_SENSOR_1,
-        name="Catalyst Temperature Bank 1 Sensor 1",
-        icon="mdi:gauge",
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    ObdSensorEntityConfig(
-        command=commands.VEHICLE_VOLTAGE,
-        name="Vehicle Voltage",
-        icon="mdi:gauge",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    ObdSensorEntityConfig(
-        command=commands.ACCELERATOR_POSITION_RELATIVE,
-        name="Accelerator Position Relative",
-        icon="mdi:gauge",
-        device_class=SensorDeviceClass.POWER_FACTOR,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
+    # ObdSensorEntityConfig(
+    #     command=commands.CATALYST_TEMP_BANK_1_SENSOR_1,
+    #     name="Catalyst Temperature Bank 1 Sensor 1",
+    #     icon="mdi:gauge",
+    #     device_class=SensorDeviceClass.TEMPERATURE,
+    #     state_class=SensorStateClass.MEASUREMENT,
+    # ),
+    # ObdSensorEntityConfig(
+    #     command=commands.VEHICLE_VOLTAGE,
+    #     name="Vehicle Voltage",
+    #     icon="mdi:gauge",
+    #     device_class=SensorDeviceClass.VOLTAGE,
+    #     state_class=SensorStateClass.MEASUREMENT,
+    # ),
+    # ObdSensorEntityConfig(
+    #     command=commands.ACCELERATOR_POSITION_RELATIVE,
+    #     name="Accelerator Position Relative",
+    #     icon="mdi:gauge",
+    #     device_class=SensorDeviceClass.POWER_FACTOR,
+    #     state_class=SensorStateClass.MEASUREMENT,
+    # ),
 ]
 
 
@@ -84,6 +81,9 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: Obd2BleConfigEntry, async_add_entities
 ):
     """Set up sensor platform."""
+
+    _LOGGER.debug("Configured commands %s", entry.options.get(CONF_COMMANDS))
+
     coordinator = entry.runtime_data
     entities = [
         ObdBleSensor(coordinator, entry, sensor)

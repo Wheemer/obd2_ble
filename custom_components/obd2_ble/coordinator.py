@@ -31,10 +31,6 @@ from .obdii.transport_ble import TransportBLE
 
 _LOGGER = logging.getLogger(__name__)
 
-# BASE_COMMANDS = [
-#     at_commands.VERSION_ID,
-# ]
-
 class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
 
@@ -64,6 +60,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             model_id=self.api.protocol.name,
             sw_version=__version__,
         )
+
+        self._supported_pids = []
+        self._supported_cmds = []
 
         # Track which commands are active to avoid unnecessary polling of inactive commands
         self.active_commands: set[Command] = set()
@@ -153,27 +152,37 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
                 return self._cache_data
             return new_data
 
-    async def async_get_all_pid_commands(self) -> tuple[list[Any], list[Any]]:
+    # async def _get_command_by_name(self, name: str) -> Command | None:
+    #     """Find an obdii Command object matching a string name."""
+    #     _, commands = await self.async_get_all_pid_commands()
+    #     for cmd in commands:
+    #         if getattr(cmd, "name", "") == name:
+    #             return cmd
+    #     return None
+
+    async def async_get_all_pid_commands(self, force_refresh=False) -> tuple[list[Any], list[Any]]:
+        if self._supported_pids and self._supported_cmds and not force_refresh:
+            return self._supported_pids, self._supported_cmds
+        
         if not self.api.is_connected():
             raise UpdateFailed("No connection to OBD2 to get supported PIDs and Commands")
         
-        supported_pids = []
-        supported_cmds = []
+        self._supported_pids = []
+        self._supported_cmds = []
         for cmd in range(0x00, 0xE0, 0x20):
             try:
                 response: Response = await self.hass.async_add_executor_job(self.api.query, commands[1][cmd])
-                # response = self.api.query(commands[1][cmd])
                 if isinstance(response.value, list):
-                    supported_pids.extend(response.value)
+                    self._supported_pids.extend(response.value)
                     for pid in response.value:
                         try:
-                            supported_cmds.append(commands[1][pid])
+                            self._supported_cmds.append(commands[1][pid])
                         except KeyError:
                             _LOGGER.warning(f"PID {pid} is supported but no command found in library")
             except Exception:
                 _LOGGER.warning(f"Failed to query supported PIDs for command {commands[1][cmd]}")
 
-        _LOGGER.info(f"Supported PIDs: {supported_pids}")
-        _LOGGER.info(f"Supported Commands: {supported_cmds}")
+        _LOGGER.info(f"Supported PIDs: {self._supported_pids}")
+        _LOGGER.info(f"Supported Commands: {self._supported_cmds}")
 
-        return supported_pids, supported_cmds
+        return self._supported_pids, self._supported_cmds
