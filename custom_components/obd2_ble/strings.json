@@ -6,7 +6,7 @@
         "description": "Please select your OBD-II Bluetooth device from the discovered list below.",
         "data": {
           "address": "Discovered Devices",
-          "auto_configure": "Attempt automatic profile detection (do not use, work in progress!)"
+          "auto_configure": "Attempt automatic profile detection."
         }
       },
       "connection": {

@@ -1,8 +1,6 @@
 """Adds config flow for OBD2 BLE."""
 
-from glob import translate
 import logging
-import re
 from typing import Any
 
 try:
@@ -15,7 +13,6 @@ from dataclasses import dataclass
 import voluptuous as vol
 
 from bleak.backends.device import BLEDevice
-from bleak.backends.scanner import AdvertisementData
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
 from obdii import commands as obdii_commands
@@ -50,7 +47,7 @@ from .const import (
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
 )
 from .obdii.transport_ble import TransportBLE
-from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, MatcherPattern
+from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -84,6 +81,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._characteristic_uuid_write: str = DEFAULT_CHARACTERISTIC_UUID_WRITE
         self._protocol: Protocol = Protocol.AUTO
 
+        self._obdii_dev: type[BaseOBD2] | None = None
         self._transport: TransportBLE | None = None
 
     @staticmethod
@@ -94,55 +92,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow."""
         return Obd2BleOptionsFlowHandler()
 
-    def advertisement_matches(
-        self,
-        matcher: MatcherPattern,
-        adv_data: AdvertisementData,
-        mac_addr: str
-    ) -> bool:
-        """Determine whether the given advertisement data matches the specified pattern.
-        Args:
-            matcher (MatcherPattern): A dictionary containing the matching criteria.
-            adv_data (AdvertisementData): An object containing the advertisement data to be checked.
-            mac_addr (str): Bluetooth device address in the format: "00:11:22:aa:bb:cc"
-
-        Returns:
-            bool: True if the advertisement data matches the specified pattern, False otherwise.
-        """
-        if (
-            service_uuid := matcher.get("service_uuid")
-        ) and service_uuid not in adv_data.service_uuids:
-            return False
-
-        if (
-            service_data_uuid := matcher.get("service_data_uuid")
-        ) and service_data_uuid not in adv_data.service_data:
-            return False
-
-        if (oui := matcher.get("oui")) and not mac_addr.lower().startswith(oui.lower()[:8]):
-            return False
-
-        if (manufacturer_id := matcher.get("manufacturer_id")) is not None:
-            if manufacturer_id not in adv_data.manufacturer_data:
-                return False
-
-            if manufacturer_data_start := matcher.get("manufacturer_data_start"):
-                if not adv_data.manufacturer_data[manufacturer_id].startswith(
-                    bytes(manufacturer_data_start)
-                ):
-                    return False
-
-        return not (
-            (local_name := matcher.get("local_name"))
-            and not re.compile(translate(local_name)).match(adv_data.local_name or "")
-        )
-
     async def _async_device_supported(
         self, discovery_info: BluetoothServiceInfoBleak
     ) -> type[BaseOBD2] | None:
         """Check if device is supported by an available OBD2 BLE class."""
         for obd2_class in AVAILABLE_OBD2_CLASSES:
-            if all([self.advertisement_matches(matcher, discovery_info.advertisement, discovery_info.address) for matcher in obd2_class.matcher_dict_list()]):
+            if all([advertisement_matches(matcher, discovery_info.advertisement, discovery_info.address) for matcher in obd2_class.matcher_dict_list()]):
                 _LOGGER.debug(
                     "Device %s (%s) detected as '%s'",
                     discovery_info.name,
@@ -183,6 +138,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             self._abort_if_unique_id_configured()
 
+            if user_input.get(CONF_AUTO_CONFIGURE, True):
+                if obdii_dev := await self._async_device_supported(self._discovery_info):
+                    _LOGGER.debug("Auto-configuring device %s using class %s", self._discovery_info.name, obdii_dev.__name__)
+                    self._obdii_dev = obdii_dev
+                    self._characteristic_uuid_read = obdii_dev.uuid_rx()
+                    self._characteristic_uuid_write = obdii_dev.uuid_tx()
+                else:
+                    _LOGGER.warning("Device %s does not match any known OBD2 classes, auto-configuration may fail", self._discovery_info.name)
+
             ble_device: BLEDevice | None = async_ble_device_from_address(
                 self.hass, self._discovery_info.address, True
             )
@@ -194,16 +158,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 loop=self.hass.loop,
             )
             await self._transport.async_connect()
-
-            if user_input.get(CONF_AUTO_CONFIGURE, True):
-                if obdii_dev := await self._async_device_supported(self._discovery_info):
-                    _LOGGER.debug("Auto-configuring device %s using class %s", self._discovery_info.name, obdii_dev.__name__)
-                    self._characteristic_uuid_read = obdii_dev.uuid_rx()
-                    self._characteristic_uuid_write = obdii_dev.uuid_tx()
-                    raise NotImplementedError("Auto-configuration based on device class is not fully implemented yet")
-                    # TODO: Add validation that the service and characteristics actually exist on the device, and fall back to manual selection if not
-                else:
-                    _LOGGER.warning("Device %s does not match any known OBD2 classes, auto-configuration may fail", self._discovery_info.name)
 
             return await self.async_step_connection()
 
@@ -233,7 +187,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
                 vol.Required(
-                    CONF_AUTO_CONFIGURE, default=False
+                    CONF_AUTO_CONFIGURE, default=True
                 ): bool,
             }
         )
