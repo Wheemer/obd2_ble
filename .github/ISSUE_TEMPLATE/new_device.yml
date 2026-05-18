@@ -1,0 +1,23 @@
+---
+name: Support for new device
+about: Provide data that could enable use of another OBD2 dongle
+title: "[NEW DEV] "
+labels: enhancement
+assignees: ''
+
+---
+
+## Prerequisites
+
+- [ ] The device is BLE compliant (can be accessed without BT pairing)
+- [ ] The device can connect to my car (working with OBD phone app)
+
+## General device description
+
+Describe the device you want to enable usage of.
+Add applicable links to device description and/or store
+
+## Additional data (if aplicable)
+
+Attach Home Assistant debug log, if device is identified but cant connect.
+Attach device service inventory, can be extracted using phone apps like LightBlue
