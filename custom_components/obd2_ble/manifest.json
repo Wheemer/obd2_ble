@@ -3,6 +3,12 @@
   "name": "OBD2 BLE",
   "bluetooth": [
     {
+      "local_name": "OBD2"
+    },
+    {
+      "local_name": "OBDII"
+    },
+    {
       "service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"
     },
     {
@@ -14,10 +20,11 @@
   ],
   "codeowners": ["@dala318"],
   "config_flow": true,
-  "dependencies": ["bluetooth_adapters"],
+  "dependencies": ["bluetooth_adapters", "bluetooth"],
   "documentation": "https://github.com/dala318/obd2_ble",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/dala318/obd2_ble/issues",
+  "loggers": ["obdii", "obd2_ble"],
   "requirements": ["py-obdii", "bleak", "bleak-retry-connector"],
   "version": "0.1.0"
 }

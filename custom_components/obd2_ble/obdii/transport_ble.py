@@ -56,30 +56,20 @@ class TransportBLE(TransportBase):
     
     def _notify_callback(self, _, data: bytearray) -> None:
         with self._lock:
-            _LOGGER.debug("Data in callback: %s", data)
             self._buffer.extend(data)
         self._data_ready.set()
 
-    async def _connect(self) -> None:
+    async def async_connect(self) -> None:
         _LOGGER.debug("Attempting to connect to BLE device %s (%s)", self._ble_device.name, self._ble_device.address)
-        # self._ble_conn = BleakClient(self._ble_device)
-        # await self._ble_conn.connect()
         self._ble_conn = await establish_connection(
             BleakClientWithServiceCache,
             self._ble_device,
             self._ble_device.name or "Unknown Device",
             max_attempts=3
         )
-        # if self._ble_conn is None:
-        #     raise ConnectionError(f"Failed to connect to BLE device {self._ble_device.address}")
-        
         await self._ble_conn.start_notify(self.config["uuid_read"], self._notify_callback)
-        for service in self._ble_conn.services:
-            _LOGGER.debug("Discovered service: %s", service.uuid)
-            for characteristic in service.characteristics:
-                _LOGGER.debug("Discovered characteristic: %s", characteristic.uuid)
 
-    async def _close(self) -> None:
+    async def async_close(self) -> None:
         if self._ble_conn and self._ble_conn.is_connected:
             await self._ble_conn.stop_notify(self.config["uuid_read"])
             await self._ble_conn.disconnect()
@@ -102,7 +92,7 @@ class TransportBLE(TransportBase):
             self._loop = loop
 
         try:
-            self._run_coro(self._connect())
+            self._run_coro(self.async_connect())
         except Exception:
             self.close() # Cleanup on failure
             raise
@@ -110,7 +100,7 @@ class TransportBLE(TransportBase):
     def close(self) -> None:
         if self.is_connected():
             try:
-                self._run_coro(self._close())
+                self._run_coro(self.async_close())
             except Exception:
                 pass # Already disconnecting or loop is dead
 
@@ -148,3 +138,17 @@ class TransportBLE(TransportBase):
             self._data_ready.clear()
 
         return snapshot
+    
+    def __enter__(self) -> "TransportBLE":
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    async def __aenter__(self) -> "TransportBLE":
+        await self.async_connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.async_close()
