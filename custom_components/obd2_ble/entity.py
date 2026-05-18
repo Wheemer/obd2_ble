@@ -10,6 +10,7 @@ from .coordinator import Obd2BleDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+
 class ObdBleEntity(CoordinatorEntity[Obd2BleDataUpdateCoordinator]):
     """Config entry for obd2_ble."""
 
@@ -19,7 +20,6 @@ class ObdBleEntity(CoordinatorEntity[Obd2BleDataUpdateCoordinator]):
         self._command = command
         self._attr_device_info = coordinator.device_info
         self._attr_unique_id = f"{config_entry.data[CONF_ADDRESS]}-{domain}-{command.name}"
-
 
     async def async_added_to_hass(self):
         """Run when entity is added to register its command."""
@@ -32,3 +32,4 @@ class ObdBleEntity(CoordinatorEntity[Obd2BleDataUpdateCoordinator]):
         self.coordinator.active_commands.discard(self._command)
         _LOGGER.debug("Removed command %s from active commands", self._command)
         await super().async_will_remove_from_hass()
+

@@ -116,7 +116,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             # if response and response.value and self.device_info and "identifiers" in self.device_info:
             #     self.device_info["identifiers"].add(("description", response.value))
 
-            await self.async_get_all_pid_commands()
+            # await self.async_get_all_pid_commands()
 
             new_data = {}
             for command in self.active_commands:
@@ -152,14 +152,6 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
                 return self._cache_data
             return new_data
 
-    # async def _get_command_by_name(self, name: str) -> Command | None:
-    #     """Find an obdii Command object matching a string name."""
-    #     _, commands = await self.async_get_all_pid_commands()
-    #     for cmd in commands:
-    #         if getattr(cmd, "name", "") == name:
-    #             return cmd
-    #     return None
-
     async def async_get_all_pid_commands(self, force_refresh=False) -> tuple[list[Any], list[Any]]:
         if self._supported_pids and self._supported_cmds and not force_refresh:
             return self._supported_pids, self._supported_cmds
@@ -168,7 +160,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("No connection to OBD2 to get supported PIDs and Commands")
         
         self._supported_pids = []
-        self._supported_cmds = []
+        self._supported_cmds = [commands.ENGINE_SPEED, commands.VEHICLE_SPEED]  # TOOD: added for debugging, remove after testing
         for cmd in range(0x00, 0xE0, 0x20):
             try:
                 response: Response = await self.hass.async_add_executor_job(self.api.query, commands[1][cmd])

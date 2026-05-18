@@ -48,6 +48,7 @@ from .const import (
 )
 from .obdii.transport_ble import TransportBLE
 from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
+from .sensor import propose_sensor_properties
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -361,7 +362,6 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
     ) -> config_entries.ConfigFlowResult:
 
         if user_input is not None:
-            # self._options.update(user_input)
             self._options[CONF_COMMANDS] = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
             return self.async_create_entry(
                 title=self.config_entry.data.get(CONF_ADDRESS),
@@ -369,6 +369,8 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             )
         
         _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
+        commands = list(set(commands) | set(self.config_entry.runtime_data.active_commands))
+        commands = sorted(commands, key=lambda cmd: (cmd.name, cmd.mode, cmd.pid))
 
         return self.async_show_form(
             step_id="commands",
@@ -386,6 +388,41 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                             multiple=True,
                         )
                     ),
+                }
+            ),
+        )
+
+    async def async_step_commands_details(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+
+        if user_input is not None:
+            self._options[CONF_COMMANDS] = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
+            return self.async_create_entry(
+                title=self.config_entry.data.get(CONF_ADDRESS),
+                data=self._options,
+            )
+        
+        for command in self._options[CONF_COMMANDS]:
+            device_class, sensor_class = propose_sensor_properties(command)
+            _LOGGER.debug("Device class: %s Sensor class: %s", device_class, sensor_class)
+
+        return self.async_show_form(
+            step_id="commands_details",
+            data_schema=vol.Schema(
+                {
+                    # vol.Required(CONF_COMMANDS, default=[cmd.name for cmd in self._options.get(CONF_COMMANDS, [])]): selector.SelectSelector(
+                    #     selector.SelectSelectorConfig(
+                    #         options=[
+                    #             {
+                    #                 "value": command.name,
+                    #                 "label": f"{command.name} ({command.mode} {command.pid})"
+                    #             } for command in commands],
+                    #         mode=selector.SelectSelectorMode.DROPDOWN,
+                    #         translation_key="ble_services",
+                    #         multiple=True,
+                    #     )
+                    # ),
                 }
             ),
         )
