@@ -1,13 +1,4 @@
 ---
-name: New device template
-about: Provide data that could enable use of another OBD2 dongle
-title: ''
-labels: enhancement
-assignees: ''
-
----
-
----
 name: Support for new device
 about: Provide data that could enable use of another OBD2 dongle
 title: "[NEW DEV] "
@@ -29,4 +20,5 @@ Add applicable links to device description and/or store
 ## Additional data (if aplicable)
 
 Attach Home Assistant debug log, if device is identified but cant connect.
+
 Attach device service inventory, can be extracted using phone apps like LightBlue
