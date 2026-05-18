@@ -29,7 +29,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import device_registry, selector
 
 from . import Obd2BleConfigEntry
-from .coordinator import DEFAULT_SLOW_POLL, DEFAULT_XS_POLL, Obd2BleDataUpdateCoordinator
+from .coordinator import DEFAULT_SLOW_POLL, DEFAULT_XS_POLL
 from .const import (
     CONF_AUTO_CONFIGURE,
     CONF_CACHED_VALUES,
@@ -239,7 +239,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for service in self._transport.get_service_collection():
             characteristics.extend(service.characteristics)
         if not characteristics:
-            raise ValueError(f"No characteristics found")
+            raise ValueError("No characteristics found")
 
         return self.async_show_form(
             step_id="connection",
