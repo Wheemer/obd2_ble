@@ -2,6 +2,7 @@
 
 # Base component constants
 from datetime import timedelta
+from typing import Final
 
 from homeassistant.const import Platform
 
@@ -57,8 +58,6 @@ SLOW_POLL_INTERVAL = timedelta(minutes=5)
 # advertisement message will kick it back into life when back in range.
 # see __init__.py: _async_specific_device_found()
 ULTRA_SLOW_POLL_INTERVAL = timedelta(hours=1)
-
-from typing import Final
 
 ICON_KEYWORDS: Final[dict[str, str]] = {
     # --- Speed & Rotations ---
