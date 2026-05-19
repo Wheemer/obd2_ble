@@ -6,7 +6,7 @@ from typing import Any
 
 from bleak.backends.device import BLEDevice
 
-from obdii import Command, Connection, Response, at_commands, commands, __version__
+from obdii import Command, Connection, Response, at_commands, commands as veh_commands, __version__
 
 from homeassistant.components.bluetooth.api import async_address_present
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
@@ -160,19 +160,19 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed("No connection to OBD2 to get supported PIDs and Commands")
         
         self._supported_pids = []
-        self._supported_cmds = [commands.ENGINE_SPEED, commands.VEHICLE_SPEED]  # TOOD: added for debugging, remove after testing
+        self._supported_cmds = [veh_commands.ENGINE_SPEED, veh_commands.VEHICLE_SPEED, veh_commands.FUEL_STATUS, veh_commands.ENGINE_RUN_TIME]  # TOOD: added for debugging, remove after testing
         for cmd in range(0x00, 0xE0, 0x20):
             try:
-                response: Response = await self.hass.async_add_executor_job(self.api.query, commands[1][cmd])
+                response: Response = await self.hass.async_add_executor_job(self.api.query, veh_commands[1][cmd])
                 if isinstance(response.value, list):
                     self._supported_pids.extend(response.value)
                     for pid in response.value:
                         try:
-                            self._supported_cmds.append(commands[1][pid])
+                            self._supported_cmds.append(veh_commands[1][pid])
                         except KeyError:
                             _LOGGER.warning(f"PID {pid} is supported but no command found in library")
             except Exception:
-                _LOGGER.warning(f"Failed to query supported PIDs for command {commands[1][cmd]}")
+                _LOGGER.warning(f"Failed to query supported PIDs for command {veh_commands[1][cmd]}")
 
         _LOGGER.info(f"Supported PIDs: {self._supported_pids}")
         _LOGGER.info(f"Supported Commands: {self._supported_cmds}")

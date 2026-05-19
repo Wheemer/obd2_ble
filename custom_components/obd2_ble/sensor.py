@@ -4,7 +4,7 @@ import logging
 # from typing import Any
 from collections.abc import Iterable
 
-from obdii import Command, Response, commands
+from obdii import Command, Response, commands as veh_commands
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -78,61 +78,61 @@ def propose_sensor_device_class(command: Command) -> SensorDeviceClass | None:
 
 
 class Obd2BleSensorEntityConfig:
-    def __init__(self, command: Command, name: str="", icon: str = "", **kwargs) -> None:
+    def __init__(self, command: Command, name: str="", icon: str = "", unit: str = "", **kwargs) -> None:
         self.command = command
         self.description = SensorEntityDescription(
             key=command.name,
             name=name or " ".join(command.name.replace("_", " ").split()).capitalize(),
             icon = icon or propose_icon_from_command(command),
-            native_unit_of_measurement=command.units.__str__(),
+            native_unit_of_measurement=unit or command.units.__str__(),
             **kwargs,
         )
 
-SENSOR_TYPES: list[Obd2BleSensorEntityConfig] = [
-    Obd2BleSensorEntityConfig(
-        command=commands.FUEL_STATUS,
-        # name="Fuel Status",
-        # icon="mdi:gas-station",
-        device_class=SensorDeviceClass.VOLUME_STORAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    Obd2BleSensorEntityConfig(
-        command=commands.ENGINE_RUN_TIME,
-        # name="Engine run time",
-        # icon="mdi:car-shift-pattern",
-        device_class=SensorDeviceClass.DURATION,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    Obd2BleSensorEntityConfig(
-        command=commands.ENGINE_SPEED,
-        # name="Engine speed",
-        # icon="mdi:gauge",
-        suggested_display_precision=1,
-        # device_class=SensorDeviceClass.REVOLUTION_PER_MINUTE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    # Obd2BleSensorEntityConfig(
-    #     command=commands.CATALYST_TEMP_BANK_1_SENSOR_1,
-    #     name="Catalyst Temperature Bank 1 Sensor 1",
-    #     icon="mdi:gauge",
-    #     device_class=SensorDeviceClass.TEMPERATURE,
-    #     state_class=SensorStateClass.MEASUREMENT,
-    # ),
-    # Obd2BleSensorEntityConfig(
-    #     command=commands.VEHICLE_VOLTAGE,
-    #     name="Vehicle Voltage",
-    #     icon="mdi:gauge",
-    #     device_class=SensorDeviceClass.VOLTAGE,
-    #     state_class=SensorStateClass.MEASUREMENT,
-    # ),
-    # Obd2BleSensorEntityConfig(
-    #     command=commands.ACCELERATOR_POSITION_RELATIVE,
-    #     name="Accelerator Position Relative",
-    #     icon="mdi:gauge",
-    #     device_class=SensorDeviceClass.POWER_FACTOR,
-    #     state_class=SensorStateClass.MEASUREMENT,
-    # ),
-]
+# SENSOR_TYPES: list[Obd2BleSensorEntityConfig] = [
+#     Obd2BleSensorEntityConfig(
+#         command=veh_commands.FUEL_STATUS,
+#         # name="Fuel Status",
+#         # icon="mdi:gas-station",
+#         device_class=SensorDeviceClass.VOLUME_STORAGE,
+#         state_class=SensorStateClass.MEASUREMENT,
+#     ),
+#     Obd2BleSensorEntityConfig(
+#         command=veh_commands.ENGINE_RUN_TIME,
+#         # name="Engine run time",
+#         # icon="mdi:car-shift-pattern",
+#         device_class=SensorDeviceClass.DURATION,
+#         state_class=SensorStateClass.TOTAL_INCREASING,
+#     ),
+#     Obd2BleSensorEntityConfig(
+#         command=veh_commands.ENGINE_SPEED,
+#         # name="Engine speed",
+#         # icon="mdi:gauge",
+#         suggested_display_precision=1,
+#         # device_class=SensorDeviceClass.REVOLUTION_PER_MINUTE,
+#         state_class=SensorStateClass.MEASUREMENT,
+#     ),
+#     # Obd2BleSensorEntityConfig(
+#     #     command=veh_commands.CATALYST_TEMP_BANK_1_SENSOR_1,
+#     #     name="Catalyst Temperature Bank 1 Sensor 1",
+#     #     icon="mdi:gauge",
+#     #     device_class=SensorDeviceClass.TEMPERATURE,
+#     #     state_class=SensorStateClass.MEASUREMENT,
+#     # ),
+#     # Obd2BleSensorEntityConfig(
+#     #     command=veh_commands.VEHICLE_VOLTAGE,
+#     #     name="Vehicle Voltage",
+#     #     icon="mdi:gauge",
+#     #     device_class=SensorDeviceClass.VOLTAGE,
+#     #     state_class=SensorStateClass.MEASUREMENT,
+#     # ),
+#     # Obd2BleSensorEntityConfig(
+#     #     command=veh_commands.ACCELERATOR_POSITION_RELATIVE,
+#     #     name="Accelerator Position Relative",
+#     #     icon="mdi:gauge",
+#     #     device_class=SensorDeviceClass.POWER_FACTOR,
+#     #     state_class=SensorStateClass.MEASUREMENT,
+#     # ),
+# ]
 
 
 async def async_setup_entry(
@@ -142,10 +142,25 @@ async def async_setup_entry(
 
     _LOGGER.debug("Configured commands %s", entry.options.get(CONF_COMMANDS))
 
+    sensor_commands: list[Obd2BleSensorEntityConfig] = []
+    for command_config in entry.options.get(CONF_COMMANDS, []):
+        try:
+            command = veh_commands[command_config.get("command")]
+        except KeyError:
+            _LOGGER.error(f"Command {command_config.get('command')} not found in obdii.commands, skipping")
+        else:
+            sensor_commands.append(Obd2BleSensorEntityConfig(
+                command=command,
+                icon=command_config.get("icon"),
+                unit=command_config.get("unit"),
+                device_class=command_config.get("device_class"),
+                state_class=command_config.get("state_class")
+            ))
     coordinator = entry.runtime_data
     entities = [
         ObdBleSensor(coordinator, entry, sensor)
-        for sensor in SENSOR_TYPES
+        # for sensor in SENSOR_TYPES
+        for sensor in sensor_commands
     ]
     async_add_entities(entities)
 
