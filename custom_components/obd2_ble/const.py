@@ -17,15 +17,22 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 # Configuration and options
 CONF_AUTO_CONFIGURE = "auto_configure"
-CONF_CACHED_VALUES = "cached_values"
-CONF_COMMANDS = "commands"
-CONF_FAST_POLL = "fast_poll"
-CONF_SLOW_POLL = "slow_poll"
-CONF_XS_POLL = "xs_poll"
 CONF_CHARACTERISTIC_UUID_READ = "characteristic_uuid_read"
 CONF_CHARACTERISTIC_UUID_WRITE = "characteristic_uuid_write"
-CONF_ENABLED = "enabled"
 CONF_PROTOCOL = "protocol"
+CONF_ENABLED = "enabled"
+
+CONF_CACHED_VALUES = "cached_values"
+CONF_SLOW_POLL = "slow_poll"
+CONF_FAST_POLL = "fast_poll"
+CONF_XS_POLL = "xs_poll"
+
+CONF_COMMANDS = "commands"
+CONF_COMMAND = "command"
+CONF_ICON = "icon"
+CONF_UNIT = "unit"
+CONF_DEVICE_CLASS = "device_class"
+CONF_STATE_CLASS = "state_class"
 
 # Defaults
 DEFAULT_NAME = DOMAIN

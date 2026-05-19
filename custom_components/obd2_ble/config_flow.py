@@ -30,26 +30,34 @@ from homeassistant.helpers import device_registry, selector
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 from . import Obd2BleConfigEntry
-from .coordinator import DEFAULT_SLOW_POLL, DEFAULT_XS_POLL
 from .const import (
-    CONF_AUTO_CONFIGURE,
-    CONF_CACHED_VALUES,
-    CONF_COMMANDS,
-    CONF_FAST_POLL,
-    CONF_SLOW_POLL,
-    CONF_XS_POLL,
-    DEFAULT_CACHED_VALUES,
-    DEFAULT_FAST_POLL,
     DOMAIN,
+    CONF_AUTO_CONFIGURE,
     CONF_CHARACTERISTIC_UUID_READ,
     CONF_CHARACTERISTIC_UUID_WRITE,
     CONF_PROTOCOL,
     DEFAULT_CHARACTERISTIC_UUID_READ,
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
+
+    CONF_CACHED_VALUES,
+    CONF_FAST_POLL,
+    CONF_SLOW_POLL,
+    CONF_XS_POLL,
+    DEFAULT_CACHED_VALUES,
+    DEFAULT_FAST_POLL,
+    DEFAULT_SLOW_POLL,
+    DEFAULT_XS_POLL,
+
+    CONF_COMMANDS,
+    CONF_COMMAND,
+    CONF_ICON,
+    CONF_UNIT,
+    CONF_DEVICE_CLASS,
+    CONF_STATE_CLASS,
 )
 from .obdii.transport_ble import TransportBLE
 from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
-from .sensor import Obd2BleSensorEntityConfig, propose_icon_from_command, propose_sensor_device_class, propose_sensor_state_class
+from .sensor import get_list_of_units, propose_icon_from_command, propose_sensor_device_class, propose_sensor_state_class
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -370,15 +378,15 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             return await self.async_step_commands_config()
 
         _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
-        if pre_configured := [cmd for cmd in self._options.get(CONF_COMMANDS, [])]:
-            commands = list(set(commands) | set([cmd.command for cmd in pre_configured]))
+        if pre_configured := self._options.get(CONF_COMMANDS):
+            commands = list(set(commands) | set([veh_commands[cmd[CONF_COMMAND]] for cmd in pre_configured]))
         commands = sorted(commands, key=lambda cmd: (cmd.name, cmd.mode, cmd.pid))
 
         return self.async_show_form(
             step_id="commands_select",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_COMMANDS, default=[cmd.command.name for cmd in self._options.get(CONF_COMMANDS, [])]): selector.SelectSelector(
+                    vol.Required(CONF_COMMANDS, default=[cmd[CONF_COMMAND] for cmd in self._options.get(CONF_COMMANDS, [])]): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {
@@ -401,15 +409,15 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if user_input is not None:
             self._configured_commands.append(
                 {
-                    "command": self._command.name,
-                    "icon": user_input.get("icon"),
-                    "device_class": user_input.get("device_class"),
-                    "state_class": user_input.get("state_class"),
+                    CONF_COMMAND: self._command.name,
+                    CONF_ICON: user_input.get(CONF_ICON),
+                    CONF_UNIT: user_input.get(CONF_UNIT),
+                    CONF_DEVICE_CLASS: user_input.get(CONF_DEVICE_CLASS),
+                    CONF_STATE_CLASS: user_input.get(CONF_STATE_CLASS),
                 }
             )
 
             if len(self._selected_commands) == 0:
-                # self._options[CONF_COMMANDS] = [veh_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
                 self._options[CONF_COMMANDS] = self._configured_commands
                 return self.async_create_entry(
                     title=self.config_entry.data.get(CONF_ADDRESS),
@@ -427,8 +435,10 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             },
             data_schema=vol.Schema(
                 {
-                    vol.Optional("icon", default=propose_icon_from_command(self._command)): selector.IconSelector(),
-                    vol.Optional("device_class", default=propose_sensor_device_class(self._command)): selector.SelectSelector(
+                    # TODO: First proposal should be from previous config if exists, then from command metadata (e.g. units), then from heuristics (e.g. icon based on command name)
+                    vol.Optional(CONF_ICON, default=propose_icon_from_command(self._command)): selector.IconSelector(),
+                    vol.Optional(CONF_UNIT, default=get_list_of_units(self._command)[0] if get_list_of_units(self._command) else None): vol.Any(None, selector.TextSelector()),
+                    vol.Optional(CONF_DEVICE_CLASS, default=propose_sensor_device_class(self._command) or None): vol.Any(None, selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {
@@ -437,8 +447,8 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                                 } for dev_cls in SensorDeviceClass],
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         ),
-                    ),
-                    vol.Optional("state_class", default=propose_sensor_state_class(self._command)): selector.SelectSelector(
+                    )),
+                    vol.Optional(CONF_STATE_CLASS, default=propose_sensor_state_class(self._command) or None): vol.Any(None, selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {
@@ -447,7 +457,7 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                                 } for state_cls in SensorStateClass],
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         ),
-                    ),
+                    )),
                 }
             ),
         )
