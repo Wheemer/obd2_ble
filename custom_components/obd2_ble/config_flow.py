@@ -15,7 +15,7 @@ import voluptuous as vol
 from bleak.backends.device import BLEDevice
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
-from obdii import commands as obdii_commands
+from obdii import Command, commands as obdii_commands
 from obdii.protocol import Protocol
 
 from homeassistant import config_entries
@@ -27,6 +27,7 @@ from homeassistant.components.bluetooth import (
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry, selector
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 from . import Obd2BleConfigEntry
 from .coordinator import DEFAULT_SLOW_POLL, DEFAULT_XS_POLL
@@ -48,7 +49,7 @@ from .const import (
 )
 from .obdii.transport_ble import TransportBLE
 from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
-from .sensor import propose_sensor_properties
+from .sensor import Obd2BleSensorEntityConfig, propose_icon_from_command, propose_sensor_device_class, propose_sensor_state_class
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -234,7 +235,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PROTOCOL: self._protocol,
                 },
             )
-        
+
         assert self._transport is not None and self._transport.is_connected(), "Transport should have been initialized and connected by now"
         characteristics: list[BleakGATTCharacteristic] = []
         for service in self._transport.get_service_collection():
@@ -307,6 +308,8 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
     def __init__(self) -> None:
         """Initialize options flow."""
         self._options: dict = {}
+        self._selected_commands: list[Command] = []
+        self._configured_commands: list[Obd2BleSensorEntityConfig] = []
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -315,20 +318,15 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if not self._options:
             self._options = dict(self.config_entry.options)
 
-        # Home Assistant takes a list of step IDs and renders them as a menu.
-        # Clicking a button automatically calls async_step_<step_id>
         return self.async_show_menu(
             step_id="init",
-            menu_options=["polling", "commands"],
-            description_placeholders={
-                "polling": "Configure polling intervals for different device states",
-                "commands": "Configure custom OBD-II commands"
-            }
+            menu_options=["polling", "commands_select"],
         )
 
     async def async_step_polling(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        """Handle polling interval setup options form."""
 
         if user_input is not None:
             self._options.update(user_input)
@@ -336,7 +334,7 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 title=self.config_entry.data.get(CONF_ADDRESS),
                 data=self._options,
             )
-        
+
         return self.async_show_form(
             step_id="polling",
             data_schema=vol.Schema(
@@ -357,23 +355,32 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             ),
         )
 
-    async def async_step_commands(
+    async def async_step_commands_select(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
+        """Handle choosing which commands should be loaded."""
 
         if user_input is not None:
-            self._options[CONF_COMMANDS] = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
-            return self.async_create_entry(
-                title=self.config_entry.data.get(CONF_ADDRESS),
-                data=self._options,
-            )
-        
+            if len(user_input[CONF_COMMANDS]) == 0:
+                self._options[CONF_COMMANDS] = []
+                return self.async_create_entry(
+                    title=self.config_entry.data.get(CONF_ADDRESS),
+                    data=self._options,
+                )
+
+            # Save the list of target objects we want to configure sequentially
+            self._selected_commands = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
+            self._configured_commands = [] # Reset our configuration queue storage
+            return await self.async_step_commands_config()
+
         _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
-        commands = list(set(commands) | set(self.config_entry.runtime_data.active_commands))
+        # commands = list(set(commands) | set([cmd.command for cmd in self.config_entry.runtime_data.active_commands]))
+        if pre_configured := self._options.get(CONF_COMMANDS):
+            commands = list(set(commands) | set([cmd.command for cmd in pre_configured]))
         commands = sorted(commands, key=lambda cmd: (cmd.name, cmd.mode, cmd.pid))
 
         return self.async_show_form(
-            step_id="commands",
+            step_id="commands_select",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_COMMANDS, default=[cmd.name for cmd in self._options.get(CONF_COMMANDS, [])]): selector.SelectSelector(
@@ -384,7 +391,7 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                                     "label": f"{command.name} ({command.mode} {command.pid})"
                                 } for command in commands],
                             mode=selector.SelectSelectorMode.DROPDOWN,
-                            translation_key="ble_services",
+                            translation_key="commands",
                             multiple=True,
                         )
                     ),
@@ -392,37 +399,51 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             ),
         )
 
-    async def async_step_commands_details(
+    async def async_step_commands_config(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
 
-        if user_input is not None:
-            self._options[CONF_COMMANDS] = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
+        if user_input is not None and len(self._selected_commands) == 0:
+            # self._options[CONF_COMMANDS] = [obdii_commands[cmd_name] for cmd_name in user_input[CONF_COMMANDS]]
+            self._options[CONF_COMMANDS] = self._configured_commands
             return self.async_create_entry(
                 title=self.config_entry.data.get(CONF_ADDRESS),
                 data=self._options,
             )
-        
-        for command in self._options[CONF_COMMANDS]:
-            device_class, sensor_class = propose_sensor_properties(command)
-            _LOGGER.debug("Device class: %s Sensor class: %s", device_class, sensor_class)
+
+        # Pull the active processing object out of the tracking queue list
+        assert len(self._selected_commands) != 0, "Should not have gotten to here if no commands are selected"
+        command = self._selected_commands.pop(0)
+        # pre_configure = 
 
         return self.async_show_form(
-            step_id="commands_details",
+            step_id="commands_config",
+            description_placeholders={
+                "command_name": " ".join(command.name.replace("_", " ").split()).capitalize()
+            },
             data_schema=vol.Schema(
                 {
-                    # vol.Required(CONF_COMMANDS, default=[cmd.name for cmd in self._options.get(CONF_COMMANDS, [])]): selector.SelectSelector(
-                    #     selector.SelectSelectorConfig(
-                    #         options=[
-                    #             {
-                    #                 "value": command.name,
-                    #                 "label": f"{command.name} ({command.mode} {command.pid})"
-                    #             } for command in commands],
-                    #         mode=selector.SelectSelectorMode.DROPDOWN,
-                    #         translation_key="ble_services",
-                    #         multiple=True,
-                    #     )
-                    # ),
+                    vol.Optional("icon", default=propose_icon_from_command(command)): selector.IconSelector(),
+                    vol.Optional("device_class", default=propose_sensor_device_class(command)): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": dev_cls.value,
+                                    "label": f"{dev_cls.name.replace('_', ' ').title()}"
+                                } for dev_cls in SensorDeviceClass],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        ),
+                    ),
+                    vol.Optional("state_class", default=propose_sensor_state_class(command)): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                {
+                                    "value": state_cls.value,
+                                    "label": f"{state_cls.name.replace('_', ' ').title()}"
+                                } for state_cls in SensorStateClass],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        ),
+                    ),
                 }
             ),
         )

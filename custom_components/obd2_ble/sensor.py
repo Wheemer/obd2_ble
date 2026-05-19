@@ -32,47 +32,49 @@ def propose_icon_from_command(command: Command) -> str:
     return "mdi:car-diagnostic"
 
 
-def propose_sensor_properties(command: Command) -> tuple[SensorDeviceClass | None, SensorStateClass | None]:
+def propose_sensor_state_class(command: Command) -> SensorStateClass | None:
     """Analyze OBD2 metrics using normalized unit collections."""
 
-    # Extract the units safely. It now reliably returns a tuple, e.g., ('°C',) or ('kPa',) or ()
-    # Even if command.units was originally a single raw string or None!
     if isinstance(command.units, Iterable) and not isinstance(command.units, (str, bytes)):
         raw_units = list(command.units)
     else:
         raw_units = [command.units]
     primary_unit = raw_units[0] if raw_units else None
-
     tokens = command.name.lower().split("_")
     last_token = tokens[-1] if tokens else ""
 
-    # 1. State Class evaluation
     if primary_unit is None or primary_unit in ("string", "bool"):
-        state_class = None
+        return None
     elif last_token in ("count", "distance", "time", "odometer"):
-        state_class = SensorStateClass.TOTAL_INCREASING
+        return SensorStateClass.TOTAL_INCREASING
+    return SensorStateClass.MEASUREMENT
+
+
+def propose_sensor_device_class(command: Command) -> SensorDeviceClass | None:
+    """Analyze OBD2 metrics using normalized unit collections."""
+
+    if isinstance(command.units, Iterable) and not isinstance(command.units, (str, bytes)):
+        raw_units = list(command.units)
     else:
-        state_class = SensorStateClass.MEASUREMENT
+        raw_units = [command.units]
+    primary_unit = raw_units[0] if raw_units else None
+    tokens = command.name.lower().split("_")
 
-    # 2. Device Class evaluation based on the primary unit string
-    device_class = None
     if primary_unit == "°C":
-        device_class = SensorDeviceClass.TEMPERATURE
+        return SensorDeviceClass.TEMPERATURE
     elif primary_unit in ("kPa", "bar", "psi"):
-        device_class = SensorDeviceClass.PRESSURE
+        return SensorDeviceClass.PRESSURE
     elif primary_unit in ("V", "v"):
-        device_class = SensorDeviceClass.VOLTAGE
+        return SensorDeviceClass.VOLTAGE
     elif primary_unit in ("km/h", "mph"):
-        device_class = SensorDeviceClass.SPEED
+        return SensorDeviceClass.SPEED
     elif primary_unit in ("s", "seconds", "min", "h"):
-        device_class = SensorDeviceClass.DURATION
-    if device_class is None:
-        if "temp" in tokens or "temperature" in tokens:
-            device_class = SensorDeviceClass.TEMPERATURE
-        elif "speed" in tokens or "velocity" in tokens or "rpm" in tokens:
-            device_class = SensorDeviceClass.SPEED
-
-    return device_class, state_class
+        return SensorDeviceClass.DURATION
+    elif "temp" in tokens or "temperature" in tokens:
+        return SensorDeviceClass.TEMPERATURE
+    elif "speed" in tokens or "velocity" in tokens or "rpm" in tokens:
+        return SensorDeviceClass.SPEED
+    return None
 
 
 class Obd2BleSensorEntityConfig:
