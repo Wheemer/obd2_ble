@@ -13,6 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry
 
 from . import Obd2BleConfigEntry
 from .const import (
@@ -112,6 +113,7 @@ async def async_setup_entry(
 
     _LOGGER.debug("Configured commands %s", entry.options.get(CONF_COMMANDS))
 
+    active_command_names: set[str] = set()
     sensor_commands: list[Obd2BleSensorEntityConfig] = []
     for command_config in entry.options.get(CONF_COMMANDS, []):
         try:
@@ -119,6 +121,7 @@ async def async_setup_entry(
         except KeyError:
             _LOGGER.error(f"Command {command_config.get('command')} not found in obdii.commands, skipping")
         else:
+            active_command_names.add(command.name)
             sensor_commands.append(Obd2BleSensorEntityConfig(
                 command=command,
                 icon=command_config.get(CONF_ICON) or None,
@@ -126,6 +129,21 @@ async def async_setup_entry(
                 device_class=command_config.get(CONF_DEVICE_CLASS) or None,
                 state_class=command_config.get(CONF_STATE_CLASS) or None,
             ))
+
+    ent_reg = entity_registry.async_get(hass)
+    existing_registry_entries = entity_registry.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    _LOGGER.debug("Existing registry entries for this config entry: %s", existing_registry_entries)
+    for registered_entity in existing_registry_entries:
+        # Unique ID signature from entity.py: f"{address}-sensor-{command.name}"
+        unique_id_parts = registered_entity.unique_id.split("-sensor-")
+        if len(unique_id_parts) < 2:
+            continue
+        registered_command_name = unique_id_parts[1]
+        # If the tracking metric is not present in user options anymore, purge it entirely!
+        if registered_command_name not in active_command_names:
+            _LOGGER.info("Evicting unselected tracking sensor: %s", registered_entity.entity_id)
+            ent_reg.async_remove(registered_entity.entity_id)
+
     coordinator = entry.runtime_data
     entities = [
         ObdBleSensor(coordinator, entry, sensor)
