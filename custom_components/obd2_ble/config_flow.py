@@ -424,9 +424,9 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     data=self._options,
             )
 
-        # Pull the active processing object out of the tracking queue list
         assert len(self._selected_commands) != 0, "Should not have gotten to here if no commands are selected"
         self._command = self._selected_commands.pop(0)
+        previous_config = next((cmd_config for cmd_config in self._options.get(CONF_COMMANDS, []) if cmd_config[CONF_COMMAND] == self._command.name), None)
 
         return self.async_show_form(
             step_id="commands_config",
@@ -435,10 +435,23 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             },
             data_schema=vol.Schema(
                 {
-                    # TODO: First proposal should be from previous config if exists, then from command metadata (e.g. units), then from heuristics (e.g. icon based on command name)
-                    vol.Optional(CONF_ICON, default=propose_icon_from_command(self._command)): selector.IconSelector(),
-                    vol.Optional(CONF_UNIT, default=get_list_of_units(self._command)[0] if get_list_of_units(self._command) else None): vol.Any(None, selector.TextSelector()),
-                    vol.Optional(CONF_DEVICE_CLASS, default=propose_sensor_device_class(self._command) or None): vol.Any(None, selector.SelectSelector(
+                    vol.Optional(
+                        CONF_ICON,
+                        default=previous_config.get(CONF_ICON) if previous_config
+                                else propose_icon_from_command(self._command),
+                    ): selector.IconSelector(),
+                    vol.Optional(
+                        CONF_UNIT,
+                        default=previous_config.get(CONF_UNIT) if previous_config 
+                                else get_list_of_units(self._command)[0] if get_list_of_units(self._command)
+                                else None,
+                    ): vol.Any(None, selector.TextSelector()),
+                    vol.Optional(
+                        CONF_DEVICE_CLASS,
+                        default=previous_config.get(CONF_DEVICE_CLASS) if previous_config
+                                else propose_sensor_device_class(self._command)
+                                or None,
+                    ): vol.Any(None, selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {
@@ -448,7 +461,12 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         ),
                     )),
-                    vol.Optional(CONF_STATE_CLASS, default=propose_sensor_state_class(self._command) or None): vol.Any(None, selector.SelectSelector(
+                    vol.Optional(
+                        CONF_STATE_CLASS,
+                        default=previous_config.get(CONF_STATE_CLASS) if previous_config
+                                else propose_sensor_state_class(self._command)
+                                or None,
+                    ): vol.Any(None, selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=[
                                 {

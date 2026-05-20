@@ -15,7 +15,14 @@ from homeassistant.components.sensor import (
 from homeassistant.core import HomeAssistant
 
 from . import Obd2BleConfigEntry
-from .const import CONF_COMMANDS, ICON_KEYWORDS
+from .const import (
+    CONF_COMMANDS,
+    CONF_ICON,
+    CONF_UNIT,
+    CONF_DEVICE_CLASS,
+    CONF_STATE_CLASS,
+    ICON_KEYWORDS
+)
 from .coordinator import Obd2BleDataUpdateCoordinator
 from .entity import ObdBleEntity
 
@@ -114,11 +121,10 @@ async def async_setup_entry(
         else:
             sensor_commands.append(Obd2BleSensorEntityConfig(
                 command=command,
-                # name="",
-                icon=command_config.get("icon"),
-                unit=command_config.get("unit"),
-                device_class=command_config.get("device_class"),
-                state_class=command_config.get("state_class")
+                icon=command_config.get(CONF_ICON) or None,
+                unit=command_config.get(CONF_UNIT) or None,
+                device_class=command_config.get(CONF_DEVICE_CLASS) or None,
+                state_class=command_config.get(CONF_STATE_CLASS) or None,
             ))
     coordinator = entry.runtime_data
     entities = [
