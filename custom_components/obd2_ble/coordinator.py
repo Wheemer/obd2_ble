@@ -4,8 +4,6 @@ from datetime import timedelta
 import logging
 from typing import Any
 
-from bleak.backends.device import BLEDevice
-
 from obdii import Command, Connection, Response, at_commands, commands as veh_commands, __version__
 
 from homeassistant.components.bluetooth.api import async_address_present
@@ -14,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConditionError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
 
 from .const import (
     CONF_CACHED_VALUES,
@@ -35,7 +34,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the API."""
 
     def __init__(
-        self, hass: HomeAssistant, device: BLEDevice, api: Connection, options
+        self, hass: HomeAssistant, api: Connection
     ) -> None:
         """Initialize."""
         super().__init__(
@@ -45,27 +44,27 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=FAST_POLL_INTERVAL,
             always_update=True,
         )
-        self._device: BLEDevice = device
         self.api = api
         if not isinstance(api.transport, TransportBLE):
             raise ConditionError("API transport is not of type TransportBLE")
         self.transport: TransportBLE = api.transport  # Shortcut to typed instance
         self._cache_data: dict[str, Any] = {}
-        self.options = options
-
-        self.device_info = DeviceInfo(
-            identifiers={(DOMAIN, device.address), (BLUETOOTH_DOMAIN, device.address)},
-            connections={(CONNECTION_BLUETOOTH, device.address)},
-            # name=device.name,
-            model_id=self.api.protocol.name,
-            sw_version=__version__,
-        )
 
         self._supported_pids = []
         self._supported_cmds = []
 
         # Track which commands are active to avoid unnecessary polling of inactive commands
         self.active_commands: set[Command] = set()
+
+        if not self.config_entry or not self.config_entry.unique_id:
+            raise ConditionError("No address found in config entry data")
+        self.device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.config_entry.unique_id), (BLUETOOTH_DOMAIN, self.config_entry.unique_id)},
+            connections={(CONNECTION_BLUETOOTH, self.config_entry.unique_id)},
+            # name=device.name,
+            model_id=self.api.protocol.name,
+            sw_version=__version__,
+        )
 
     async def async_shutdown(self) -> None:
         """Shutdown coordinator and any connection."""
@@ -82,16 +81,23 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
         """Update data via library."""
 
         # Check if the device is still available
+        if not self.config_entry:
+            _LOGGER.error("No config entry available for coordinator")
+            return {}
+        address = self.config_entry.data.get("address")
+        if not address:
+            _LOGGER.error("No address found in config entry data")
+            return {}
         _LOGGER.debug("Check if the device is still available")
-        available = async_address_present(self.hass, self._device.address, connectable=True)
+        available = async_address_present(self.hass, address, connectable=True)
         if not available:
             _LOGGER.debug("Car out of range? Switch to extra slow polling")
-            self.update_interval = timedelta(seconds=self.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
+            self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
             _LOGGER.debug(
                 "Car out of range? Switch to ultra slow polling: interval = %s",
                 self.update_interval,
             )
-            if self.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+            if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                 return self._cache_data
             return {}
 
@@ -133,13 +139,13 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             if new_data is None:
                 raise UpdateFailed("Failed to connect to OBD device")
             if len(new_data) == 0:
-                self.update_interval = timedelta(seconds=self.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
+                self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
                 _LOGGER.debug(
                     "Car is probably off, switch to slow polling: interval = %s",
                     self.update_interval,
                 )
             else:
-                self.update_interval = timedelta(seconds=self.options.get(CONF_FAST_POLL, DEFAULT_FAST_POLL))
+                self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_FAST_POLL, DEFAULT_FAST_POLL))
                 _LOGGER.debug(
                     "Car is on, polling: interval = %s",
                     self.update_interval,
@@ -147,7 +153,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Unable to fetch data: {err}") from err
         else:
-            if self.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+            if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                 self._cache_data.update(new_data)
                 return self._cache_data
             return new_data

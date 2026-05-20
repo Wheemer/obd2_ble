@@ -82,7 +82,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
     )
 
     coordinator = Obd2BleDataUpdateCoordinator(
-        hass, device=ble_device, api=api, options=entry.options or {}
+        hass, api=api
     )
 
     await coordinator.async_config_entry_first_refresh()
