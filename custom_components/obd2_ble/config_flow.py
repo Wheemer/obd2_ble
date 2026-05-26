@@ -289,7 +289,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reconfigure(self, user_input: dict | None = None) -> config_entries.ConfigFlowResult:
-        self._transport = self._get_reconfigure_entry().runtime_data.api.transport
+        self._transport = self._get_reconfigure_entry().runtime_data.transport
         assert self._transport is not None, "Transport should have been initialized by now"
         if not self._transport.is_connected():
             await self._transport.async_connect()

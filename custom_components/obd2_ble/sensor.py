@@ -205,5 +205,3 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
 #         self._description = description
 #         self._attr_name = f"{NAME} {description.name}"
 #         self._attr_entity_category = EntityCategory.DIAGNOSTIC
-    
-

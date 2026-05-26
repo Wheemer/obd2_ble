@@ -4,37 +4,53 @@ from datetime import timedelta
 import logging
 from typing import Any
 
-from obdii import Command, Connection, Response, at_commands, commands as veh_commands, __version__
+from bleak.backends.device import BLEDevice
 
+from obdii import Command, Connection, Protocol, Response, at_commands, commands as veh_commands, __version__
+from obdii.basetypes import MISSING
+
+from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth.api import async_address_present
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConditionError
+from homeassistant.exceptions import ConditionError, ConfigEntryNotReady, ConfigEntryNotReady
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
 
 from .const import (
     CONF_CACHED_VALUES,
     CONF_FAST_POLL,
     CONF_SLOW_POLL,
     CONF_XS_POLL,
+    CONF_CHARACTERISTIC_UUID_READ,
+    CONF_CHARACTERISTIC_UUID_WRITE,
+    CONF_PROTOCOL,
     DOMAIN,
     FAST_POLL_INTERVAL,
     DEFAULT_FAST_POLL,
     DEFAULT_SLOW_POLL,
     DEFAULT_XS_POLL,
-    DEFAULT_CACHED_VALUES
+    DEFAULT_CACHED_VALUES,
+    DEFAULT_CHARACTERISTIC_UUID_READ,
+    DEFAULT_CHARACTERISTIC_UUID_WRITE,
 )
 from .obdii.transport_ble import TransportBLE
 
 _LOGGER = logging.getLogger(__name__)
 
-class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
+type Obd2BleConfigEntry = ConfigEntry[Obd2BleDataUpdateCoordinator]
+
+
+class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     """Class to manage fetching data from the API."""
 
+    _cache_data: dict[str, Response]
+    
+    active_commands: set[Command]
+
     def __init__(
-        self, hass: HomeAssistant, api: Connection
+        self, hass: HomeAssistant, entry: Obd2BleConfigEntry
     ) -> None:
         """Initialize."""
         super().__init__(
@@ -43,24 +59,54 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             name=DOMAIN,
             update_interval=FAST_POLL_INTERVAL,
             always_update=True,
+            config_entry=entry,
         )
-        self.api = api
-        if not isinstance(api.transport, TransportBLE):
-            raise ConditionError("API transport is not of type TransportBLE")
-        self.transport: TransportBLE = api.transport  # Shortcut to typed instance
-        self._cache_data: dict[str, Any] = {}
+
+        address = entry.unique_id
+
+        if address is None:
+            raise ConditionError("No unique_id found in config entry")
+
+        ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
+            hass, address, True
+        )
+
+        if ble_device is None:
+            _LOGGER.debug("Failed to discover device %s via Bluetooth", address)
+            raise ConfigEntryNotReady(
+                translation_domain=DOMAIN,
+                translation_key="device_not_found",
+                translation_placeholders={
+                    "mac": address,
+                },
+            )
+
+        self.transport = TransportBLE(
+            ble_device=ble_device,
+            uuid_write=entry.data.get(CONF_CHARACTERISTIC_UUID_WRITE, DEFAULT_CHARACTERISTIC_UUID_WRITE),
+            uuid_read=entry.data.get(CONF_CHARACTERISTIC_UUID_READ, DEFAULT_CHARACTERISTIC_UUID_READ),
+            # timeout=entry.options.get("timeout", 10.0),
+            loop = hass.loop,
+        )
+
+        self.api = Connection(
+            transport=self.transport,
+            auto_connect=False,
+            protocol=Protocol(entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value)),
+            log_handler=MISSING,
+            log_formatter=MISSING,
+            log_level=MISSING,
+        )
 
         self._supported_pids = []
         self._supported_cmds = []
-
-        # Track which commands are active to avoid unnecessary polling of inactive commands
         self.active_commands: set[Command] = set()
 
-        if not self.config_entry or not self.config_entry.unique_id:
+        if not self.config_entry or not address:
             raise ConditionError("No address found in config entry data")
         self.device_info = DeviceInfo(
-            identifiers={(DOMAIN, self.config_entry.unique_id), (BLUETOOTH_DOMAIN, self.config_entry.unique_id)},
-            connections={(CONNECTION_BLUETOOTH, self.config_entry.unique_id)},
+            identifiers={(DOMAIN, address), (BLUETOOTH_DOMAIN, address)},
+            connections={(CONNECTION_BLUETOOTH, address)},
             # name=device.name,
             model_id=self.api.protocol.name,
             sw_version=__version__,
@@ -77,19 +123,15 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
         else:
             _LOGGER.debug("API connection closed successfully")
 
-    async def _async_update_data(self) -> dict[str, Any]:
+    async def _async_update_data(self) -> dict[str, Response]:
         """Update data via library."""
 
-        # Check if the device is still available
-        if not self.config_entry:
+        if not self.config_entry or not self.config_entry.unique_id:
             _LOGGER.error("No config entry available for coordinator")
             return {}
-        address = self.config_entry.data.get("address")
-        if not address:
-            _LOGGER.error("No address found in config entry data")
-            return {}
+
         _LOGGER.debug("Check if the device is still available")
-        available = async_address_present(self.hass, address, connectable=True)
+        available = async_address_present(self.hass, self.config_entry.unique_id, connectable=True)
         if not available:
             _LOGGER.debug("Car out of range? Switch to extra slow polling")
             self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
@@ -122,9 +164,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator):
             # if response and response.value and self.device_info and "identifiers" in self.device_info:
             #     self.device_info["identifiers"].add(("description", response.value))
 
-            # await self.async_get_all_pid_commands()
-
-            new_data = {}
+            new_data: dict[str, Response] = {}
             for command in self.active_commands:
                 if command is None:
                     _LOGGER.warning("Skipping invalid command: %s", command)

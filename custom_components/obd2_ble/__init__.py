@@ -7,35 +7,21 @@ https://github.com/dala318/obd2_ble
 import logging
 from typing_extensions import Final
 
-from bleak.backends.device import BLEDevice
-
-from obdii import Connection, Protocol
-from obdii.basetypes import MISSING
-
 from homeassistant.components import bluetooth
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, ConfigEntryError
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers.config_validation import config_entry_only_config_schema
 
 from .const import (
-    DEFAULT_CHARACTERISTIC_UUID_READ,
-    DEFAULT_CHARACTERISTIC_UUID_WRITE,
-    CONF_CHARACTERISTIC_UUID_READ,
-    CONF_CHARACTERISTIC_UUID_WRITE,
-    CONF_PROTOCOL,
     DOMAIN,
     PLATFORMS,
     STARTUP_MESSAGE
 )
-from .coordinator import Obd2BleDataUpdateCoordinator
-from .obdii.transport_ble import TransportBLE
+from .coordinator import Obd2BleDataUpdateCoordinator, Obd2BleConfigEntry
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 CONFIG_SCHEMA = config_entry_only_config_schema(DOMAIN)
-
-type Obd2BleConfigEntry = ConfigEntry[Obd2BleDataUpdateCoordinator]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> bool:
@@ -50,39 +36,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
             translation_key="missing_unique_id",
         )
 
-    ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
-        hass, entry.unique_id, True
-    )
-
-    if ble_device is None:
-        _LOGGER.debug("Failed to discover device %s via Bluetooth", entry.unique_id)
-        raise ConfigEntryNotReady(
-            translation_domain=DOMAIN,
-            translation_key="device_not_found",
-            translation_placeholders={
-                "mac": entry.unique_id,
-            },
-        )
-
-    transport = TransportBLE(
-        ble_device=ble_device,
-        uuid_write=entry.data.get(CONF_CHARACTERISTIC_UUID_WRITE, DEFAULT_CHARACTERISTIC_UUID_WRITE),
-        uuid_read=entry.data.get(CONF_CHARACTERISTIC_UUID_READ, DEFAULT_CHARACTERISTIC_UUID_READ),
-        # timeout=entry.options.get("timeout", 10.0),
-        loop = hass.loop,
-    )
-
-    api = Connection(
-        transport=transport,
-        auto_connect=False,
-        protocol=Protocol(entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value)),
-        log_handler=MISSING,
-        log_formatter=MISSING,
-        log_level=MISSING,
-    )
-
     coordinator = Obd2BleDataUpdateCoordinator(
-        hass, api=api
+        hass, entry=entry
     )
 
     await coordinator.async_config_entry_first_refresh()
@@ -98,12 +53,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         _LOGGER.debug("New service_info: %s - %s", service_info, change)
         hass.async_create_task(coordinator.async_request_refresh())
 
-    # stuff to do when cleaning up
+    # Stuff to do when cleaning up
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,
             _async_specific_device_found,
-            {"address": ble_device.address},
+            {"address": entry.unique_id},
             bluetooth.BluetoothScanningMode.ACTIVE,
         )  # does the register callback, and returns a cancel callback for cleanup
     )
