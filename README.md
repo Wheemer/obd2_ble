@@ -35,7 +35,7 @@ If your device it not found but within range (appears in Bluetooth Advertisement
 
 2. Once device is added klick options (cog-wheel) and "Configure commands"
 3. In the Commands config first selection page all supported commands (measuremetns) should be selectable.
-4. The Connad config page will be repeated for each selected command
+4. The Commad config page will be repeated for each selected command
 5. Once finished the integration will re-load and a device with the selecte commands should appear.
 
 ### Setup Requirements
