@@ -14,7 +14,7 @@ from homeassistant.components.bluetooth.api import async_address_present
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConditionError, ConfigEntryNotReady, ConfigEntryNotReady
+from homeassistant.exceptions import ConditionError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -36,6 +36,10 @@ from .const import (
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
 )
 from .obdii.transport_ble import TransportBLE
+try:
+    from .debug import FAKE_COMMANDS
+except ImportError:
+    FAKE_COMMANDS: list[Command] = []
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,10 +48,6 @@ type Obd2BleConfigEntry = ConfigEntry[Obd2BleDataUpdateCoordinator]
 
 class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     """Class to manage fetching data from the API."""
-
-    _cache_data: dict[str, Response]
-    
-    active_commands: set[Command]
 
     def __init__(
         self, hass: HomeAssistant, entry: Obd2BleConfigEntry
@@ -62,62 +62,81 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             config_entry=entry,
         )
 
-        address = entry.unique_id
+        self._cache_data: dict[str, Response] = {}
+        self._supported_pids = []
+        self._supported_cmds = []
 
-        if address is None:
+        self.transport: TransportBLE | None = None 
+        self.api: Connection | None = None
+        self.device_info: DeviceInfo | None = None
+        self.active_commands: set[Command] = set()
+
+        if not entry or not entry.unique_id:
             raise ConditionError("No unique_id found in config entry")
 
+        # self._connect_ble()
+
+    def _connect_ble(self) -> bool:
+        """Connect to the BLE device."""
+
+        if not self.config_entry or not self.config_entry.unique_id:
+            _LOGGER.error("No config entry available for coordinator")
+            return False
+        address = self.config_entry.unique_id
+
         ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
-            hass, address, True
+            self.hass, address, True
         )
 
         if ble_device is None:
-            _LOGGER.debug("Failed to discover device %s via Bluetooth", address)
-            raise ConfigEntryNotReady(
-                translation_domain=DOMAIN,
-                translation_key="device_not_found",
-                translation_placeholders={
-                    "mac": address,
-                },
-            )
+            _LOGGER.warning("Failed to discover device %s via Bluetooth", address)
+            # raise ConfigEntryNotReady(
+            #     translation_domain=DOMAIN,
+            #     translation_key="device_not_found",
+            #     translation_placeholders={
+            #         "mac": address,
+            #     },
+            # )
+            return False
 
         self.transport = TransportBLE(
             ble_device=ble_device,
-            uuid_write=entry.data.get(CONF_CHARACTERISTIC_UUID_WRITE, DEFAULT_CHARACTERISTIC_UUID_WRITE),
-            uuid_read=entry.data.get(CONF_CHARACTERISTIC_UUID_READ, DEFAULT_CHARACTERISTIC_UUID_READ),
-            # timeout=entry.options.get("timeout", 10.0),
-            loop = hass.loop,
+            uuid_write=self.config_entry.data.get(CONF_CHARACTERISTIC_UUID_WRITE, DEFAULT_CHARACTERISTIC_UUID_WRITE),
+            uuid_read=self.config_entry.data.get(CONF_CHARACTERISTIC_UUID_READ, DEFAULT_CHARACTERISTIC_UUID_READ),
+            # timeout=self.config_entry.options.get("timeout", 10.0),
+            loop = self.hass.loop,
         )
 
         self.api = Connection(
             transport=self.transport,
             auto_connect=False,
-            protocol=Protocol(entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value)),
+            protocol=Protocol(self.config_entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value)),
             log_handler=MISSING,
             log_formatter=MISSING,
             log_level=MISSING,
         )
 
-        self._supported_pids = []
-        self._supported_cmds = []
-        self.active_commands: set[Command] = set()
+        self.api.connect()
+        hw_version = self.api.query(at_commands.VERSION_ID)
 
-        if not self.config_entry or not address:
-            raise ConditionError("No address found in config entry data")
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, address), (BLUETOOTH_DOMAIN, address)},
             connections={(CONNECTION_BLUETOOTH, address)},
             # name=device.name,
             model_id=self.api.protocol.name,
+            hw_version=hw_version.value if hw_version else None,
             sw_version=__version__,
         )
+
+        return True
 
     async def async_shutdown(self) -> None:
         """Shutdown coordinator and any connection."""
         _LOGGER.debug("Shutting down BMS (%s)", self.name)
         await super().async_shutdown()
         try:
-            await self.hass.async_add_executor_job(self.api.close)
+            if self.api is not None and self.api.is_connected():
+                await self.hass.async_add_executor_job(self.api.close)
         except Exception as err:
             _LOGGER.warning(f"Error occurred while closing API connection: {err}")
         else:
@@ -142,7 +161,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                 return self._cache_data
             return {}
+        
+        if self.api is None:
+            if not self._connect_ble():
+                return {}
 
+        assert self.api is not None, "API should be initialized at this point"
         _LOGGER.debug("Device is available, check if connected")
         if not self.api.is_connected():
             try:
@@ -155,8 +179,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         _LOGGER.debug("Device is connected, proceed to query data")
         try:
-            response = await self.hass.async_add_executor_job(self.api.query, at_commands.VERSION_ID)
-            self.device_info["hw_version"] = response.value if response else None
+            # response = await self.hass.async_add_executor_job(self.api.query, at_commands.VERSION_ID)
+            # self.device_info["hw_version"] = response.value if response else None
             # response = await self.hass.async_add_executor_job(self.api.query, at_commands.IDENTIFIER)
             # if response and response.value and self.device_info and "identifiers" in self.device_info:
             #     self.device_info["identifiers"].add(("identifier", response.value))
@@ -201,12 +225,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     async def async_get_all_pid_commands(self, force_refresh=False) -> tuple[list[Any], list[Any]]:
         if self._supported_pids and self._supported_cmds and not force_refresh:
             return self._supported_pids, self._supported_cmds
-        
-        if not self.api.is_connected():
+
+        if self.api is None or not self.api.is_connected():
             raise UpdateFailed("No connection to OBD2 to get supported PIDs and Commands")
         
         self._supported_pids = []
-        self._supported_cmds = [veh_commands.ENGINE_SPEED, veh_commands.VEHICLE_SPEED, veh_commands.FUEL_STATUS, veh_commands.ENGINE_RUN_TIME]  # TOOD: added for debugging, remove after testing
+        self._supported_cmds = FAKE_COMMANDS.copy()
         for cmd in range(0x00, 0xE0, 0x20):
             try:
                 response: Response = await self.hass.async_add_executor_job(self.api.query, veh_commands[1][cmd])
