@@ -2,9 +2,9 @@
 
 import logging
 # from typing import Any
-from collections.abc import Iterable
+# from collections.abc import Iterable
 
-from obdii import Command, Response, commands as veh_commands
+from obdii import Command, Response #, commands as veh_commands
 
 from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
@@ -12,15 +12,15 @@ from homeassistant.components.binary_sensor import (
 )
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry
+# from homeassistant.helpers import entity_registry
 
 from . import Obd2BleConfigEntry
 from .const import (
     CONF_COMMANDS,
-    CONF_ICON,
-    CONF_UNIT,
-    CONF_DEVICE_CLASS,
-    CONF_STATE_CLASS,
+    # CONF_ICON,
+    # CONF_UNIT,
+    # CONF_DEVICE_CLASS,
+    # CONF_STATE_CLASS,
 )
 from .coordinator import Obd2BleDataUpdateCoordinator
 from .entity import ObdBleEntity
@@ -56,7 +56,7 @@ async def async_setup_entry(
 
     _LOGGER.debug("Configured commands %s", entry.options.get(CONF_COMMANDS))
 
-    active_command_names: set[str] = set()
+    # active_command_names: set[str] = set()
     sensor_commands: list[Obd2BleBinarySensorEntityConfig] = []
     # for command_config in entry.options.get(CONF_COMMANDS, []):
     #     try:
