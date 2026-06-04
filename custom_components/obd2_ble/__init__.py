@@ -69,7 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         _LOGGER.info("Firing action 'attempt_to_connect' via user trigger")
         
         try:
-            connected_successfully = await coordinator.api.force_update()
+            connected_successfully = await coordinator.async_force_update()
             return {"connected": bool(connected_successfully)}            
         except Exception as err:
             raise ServiceValidationError(

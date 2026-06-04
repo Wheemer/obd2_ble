@@ -28,7 +28,6 @@ from .const import (
     CONF_CHARACTERISTIC_UUID_WRITE,
     CONF_PROTOCOL,
     DOMAIN,
-    FAST_POLL_INTERVAL,
     DEFAULT_FAST_POLL,
     DEFAULT_SLOW_POLL,
     DEFAULT_XS_POLL,
@@ -58,7 +57,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=FAST_POLL_INTERVAL,
+            update_interval=timedelta(seconds=entry.options.get(CONF_FAST_POLL, DEFAULT_FAST_POLL)),
             always_update=True,
             config_entry=entry,
         )
@@ -257,11 +256,13 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     def car_connected(self) -> bool:
         return self._last_fetch_successful and self.ble_connected()
 
-    def force_update(self) -> bool:
+    async def async_force_update(self) -> bool:
         """Force an update of the coordinator data by calling the update method directly."""
         try:
-            # self._async_update_data()
-            return True
+            await self._async_update_data()
+            if self.car_connected():
+                _LOGGER.info("Successfully connected to the car during forced update")
+                return True
         except Exception as err:
             _LOGGER.error(f"Error during forced update: {err}")
-            return False
+        return False
