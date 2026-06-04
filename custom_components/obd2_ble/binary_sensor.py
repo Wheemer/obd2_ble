@@ -27,7 +27,7 @@ from .const import (
     # CONF_STATE_CLASS,
 )
 from .coordinator import Obd2BleDataUpdateCoordinator
-from .entity import ObdBleEntity
+# from .entity import ObdBleEntity
 
 _LOGGER = logging.getLogger(__name__)
 
