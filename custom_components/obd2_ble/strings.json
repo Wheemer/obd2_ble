@@ -1,14 +1,8 @@
 {
-  "services": {
+"services": {
     "attempt_to_connect": {
       "name": "Attempt to connect to car",
-      "description": "Connects briefly to check if the car is reachable. Useful if long polling intervals are used and you have indication that the car is reachable again.",
-      "response": {
-        "connected": {
-          "name": "Connected",
-          "description": "True if the integration successfully handshaked with the OBDII adapter."
-        }
-      }
+      "description": "Connects briefly to check if the car is reachable. Useful if long polling intervals are used and you have indication that the car is reachable again."
     }
   },
   "config": {

@@ -1,5 +1,0 @@
-attempt_to_connect:
-  name: Attempt to Connect to Car
-  description: Connects briefly to check if the car is reachable. Useful if long polling intervals are used and you have indication that the car is reachable again.
-  response:
-    optional: false

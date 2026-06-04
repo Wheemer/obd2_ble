@@ -1,7 +1,6 @@
 """Constants for OBD2 BLE."""
 
 # Base component constants
-from datetime import timedelta
 from typing import Final
 
 from homeassistant.const import Platform
