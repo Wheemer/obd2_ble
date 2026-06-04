@@ -14,6 +14,8 @@ A Home Assistant integration for reading OBD2 vehicle data via Bluetooth Low Ene
 
 ### Via HACS (Recommended)
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dala318&repository=obd2_ble&category=Integration)
+
 1. Add this repository to HACS as a custom repository.
 2. Search for "OBD2 BLE" in HACS and install it.
 3. Restart Home Assistant.
