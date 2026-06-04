@@ -8,12 +8,13 @@ import logging
 from typing_extensions import Final
 
 from homeassistant.components import bluetooth
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.exceptions import ConfigEntryError, ServiceValidationError
 from homeassistant.helpers.config_validation import config_entry_only_config_schema
 
 from .const import (
     DOMAIN,
+    ACTION_ATTEMPT_CONNECT,
     PLATFORMS,
     STARTUP_MESSAGE
 )
@@ -63,6 +64,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         )  # does the register callback, and returns a cancel callback for cleanup
     )
 
+    async def handle_attempt_to_connect(call: ServiceCall) -> ServiceResponse:
+        """Attempt a connection to the vehicle and return a boolean status."""
+        _LOGGER.info("Firing action 'attempt_to_connect' via user trigger")
+        
+        try:
+            connected_successfully = await coordinator.async_force_update()
+            return {"connected": bool(connected_successfully)}            
+        except Exception as err:
+            raise ServiceValidationError(
+                f"Communication failed while targeting the OBD2 device: {err}"
+            )
+
+    hass.services.async_register(
+        domain=DOMAIN,
+        service=ACTION_ATTEMPT_CONNECT,
+        service_func=handle_attempt_to_connect,
+        supports_response=SupportsResponse.ONLY, 
+    )
     return True
 
 
