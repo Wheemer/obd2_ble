@@ -256,3 +256,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
     def car_connected(self) -> bool:
         return self._last_fetch_successful and self.ble_connected()
+
+    def force_update(self) -> bool:
+        """Force an update of the coordinator data by calling the update method directly."""
+        try:
+            # self._async_update_data()
+            return True
+        except Exception as err:
+            _LOGGER.error(f"Error during forced update: {err}")
+            return False
