@@ -39,7 +39,7 @@
         "description": "Please select which subsystem of your OBD-II integration profile you want to adjust.",
         "menu_options": {
           "polling": "Configure polling parameters & sleep states",
-          "commands": "Select monitored PIDs & command telemetry"
+          "commands_select": "Select and configure monitored commands"
         }
       },
       "polling": {
@@ -52,11 +52,20 @@
           "xs_poll": "Out of Range/Extra-Slow Connection Sweep (seconds)"
         }
       },
-      "commands": {
+      "commands_select": {
         "title": "Select Tracked OBD2 Commands",
         "description": "Select which PIDs and OBD-II standard PID monitoring hex parameters this integration instance should actively poll from your car.",
         "data": {
-          "command": "Monitored Hex Commands & Parameters"
+          "commands": "Monitored Hex Commands & Parameters"
+        }
+      },
+      "commands_config": {
+        "title": "Configure Tracked OBD2 Commands",
+        "description": "## **{command_name}**\nSelect how the shown command shall be configured in Home Assistant.",
+        "data": {
+          "icon": "Icon for entity",
+          "device_class": "Measurement type",
+          "state_class": "Measurement behavior"
         }
       }
     }
