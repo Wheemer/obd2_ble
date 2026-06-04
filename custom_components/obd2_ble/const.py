@@ -14,7 +14,7 @@ ATTRIBUTION = "Data provided by http://jsonplaceholder.typicode.com/"
 ISSUE_URL = "https://github.com/dala318/obd2_ble/issues"
 
 # Platforms
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 # Configuration and options
 CONF_AUTO_CONFIGURE = "auto_configure"
@@ -22,6 +22,7 @@ CONF_CHARACTERISTIC_UUID_READ = "characteristic_uuid_read"
 CONF_CHARACTERISTIC_UUID_WRITE = "characteristic_uuid_write"
 CONF_PROTOCOL = "protocol"
 CONF_ENABLED = "enabled"
+CONF_HW_VERSION = "hw_version"
 
 CONF_CACHED_VALUES = "cached_values"
 CONF_SLOW_POLL = "slow_poll"
