@@ -2,6 +2,8 @@
 
 A Home Assistant integration for reading OBD2 vehicle data via Bluetooth Low Energy (BLE).
 
+Uses [PaulMarisOUMary OBDII](https://github.com/PaulMarisOUMary/OBDII) as library for interfacing the OBD2.
+
 ## Features
 
 - Real-time OBD2 data reading from compatible BLE devices
