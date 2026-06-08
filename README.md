@@ -44,7 +44,7 @@ The integration is configured via the UI. No YAML configuration is required.
 ### Setup Requirements
 
 - A compatible OBD2 BLE device
-- Home Assistant with Bluetooth support enabled
+- Home Assistant with Bluetooth support (ESPHome Bluetooth Proxy)
 
 ## Supported Devices
 
