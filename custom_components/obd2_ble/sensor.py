@@ -4,7 +4,7 @@ import logging
 # from typing import Any
 from collections.abc import Iterable
 
-from obdii import Command, Response, commands as veh_commands
+from obdii import Command, Response
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -25,6 +25,7 @@ from .const import (
     ICON_KEYWORDS
 )
 from .coordinator import Obd2BleDataUpdateCoordinator
+from .enhanced_commands import get_command
 from .entity import ObdBleEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ async def async_setup_entry(
     sensor_commands: list[Obd2BleSensorEntityConfig] = []
     for command_config in entry.options.get(CONF_COMMANDS, []):
         try:
-            command = veh_commands[command_config.get("command")]
+            command = get_command(command_config.get("command"))
         except KeyError:
             _LOGGER.error(f"Command {command_config.get('command')} not found in obdii.commands, skipping")
         else:

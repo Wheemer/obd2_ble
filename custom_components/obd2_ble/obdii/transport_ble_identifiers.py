@@ -69,7 +69,26 @@ class VlinkOBD2_BLE(OBD2_BLE):
     def uuid_tx() -> str:
         return "000018f2-0000-1000-8000-00805f9b34fb"
 
-AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [OBD2_BLE, VlinkOBD2_BLE]
+
+class VeepeakOBD2_BLE(OBD2_BLE):
+    @staticmethod
+    def matcher_dict_list() -> list[MatcherPattern]:
+        """Provide BluetoothMatcher definition for Veepeak OBDCheck BLE/BLE+."""
+        return [{
+            "local_name": "VEEPEAK*",
+            "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
+        }]
+
+    @staticmethod
+    def uuid_rx() -> str:
+        return "0000fff2-0000-1000-8000-00805f9b34fb"
+
+    @staticmethod
+    def uuid_tx() -> str:
+        return "0000fff1-0000-1000-8000-00805f9b34fb"
+
+
+AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [OBD2_BLE, VlinkOBD2_BLE, VeepeakOBD2_BLE]
 
 def advertisement_matches(
     matcher: MatcherPattern,

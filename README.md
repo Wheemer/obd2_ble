@@ -52,12 +52,38 @@ This integration supports OBD2 BLE dongles that advertise as:
 
 - `OBD2`
 - `OBDII`
+- `VEEPEAK`
+- `Veepeak`
 
 Supported BLE service UUIDs:
 
 - `0000ffe0-0000-1000-8000-00805f9b34fb`
 - `0000fff0-0000-1000-8000-00805f9b34fb`
 - `000018f0-0000-1000-8000-00805f9b34fb`
+
+Known device profiles:
+
+- Generic OBD-II BLE adapters using service `FFF0` and characteristics `FFF1`/`FFF2`
+- Vgate/V-LINK-style adapters using service `18F0` and characteristics `18F1`/`18F2`
+- Veepeak OBDCheck BLE/BLE+ adapters advertising as `VEEPEAK` using service `FFF0` and characteristics `FFF1`/`FFF2`
+
+## Enhanced PIDs
+
+The integration includes opt-in enhanced commands that may not appear in the
+standard OBD-II supported PID list.
+
+Experimental Honda/Acura automatic transmission fluid temperature candidates:
+
+- `HONDA_ATF_TEMP_8220`: request `22 82 20`, Celsius equation `A - 40`
+- `HONDA_ATF_TEMP_9023`: request `22 90 23`, Celsius equation `A - 40`
+
+Internally these commands use the equivalent `B - 40` formula because
+`py-obdii` keeps the second service-22 PID byte in the decoded payload.
+
+These are not guaranteed for every Honda/Acura model. Validate by comparing a
+cold start and warm-up curve: ATF temperature should start near ambient and rise
+more slowly than engine coolant. If it exactly mirrors coolant temperature,
+treat the selected PID as invalid for the vehicle.
 
 ## Troubleshooting
 

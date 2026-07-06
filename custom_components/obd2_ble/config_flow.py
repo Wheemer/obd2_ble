@@ -15,7 +15,7 @@ import voluptuous as vol
 from bleak.backends.device import BLEDevice
 from bleak.backends.characteristic import BleakGATTCharacteristic
 
-from obdii import Command, commands as veh_commands
+from obdii import Command
 from obdii.protocol import Protocol
 
 from homeassistant import config_entries
@@ -57,6 +57,7 @@ from .const import (
 )
 from .obdii.transport_ble import TransportBLE
 from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
+from .enhanced_commands import available_enhanced_commands, get_command
 from .sensor import get_list_of_units, propose_icon_from_command, propose_sensor_device_class, propose_sensor_state_class
 
 _LOGGER = logging.getLogger(__name__)
@@ -373,13 +374,14 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 )
 
             # Save the list of target objects we want to configure sequentially
-            self._selected_commands = [veh_commands[cmd] for cmd in user_input[CONF_COMMANDS]]
+            self._selected_commands = [get_command(cmd) for cmd in user_input[CONF_COMMANDS]]
             self._configured_commands = [] # Reset our configuration queue storage
             return await self.async_step_commands_config()
 
         _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
         if pre_configured := self._options.get(CONF_COMMANDS):
-            commands = list(set(commands) | set([veh_commands[cmd[CONF_COMMAND]] for cmd in pre_configured]))
+            commands = list(set(commands) | set([get_command(cmd[CONF_COMMAND]) for cmd in pre_configured]))
+        commands = list(set(commands) | set(available_enhanced_commands()))
         commands = sorted(commands, key=lambda cmd: (cmd.name, cmd.mode, cmd.pid))
 
         return self.async_show_form(
