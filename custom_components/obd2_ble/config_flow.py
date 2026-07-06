@@ -57,7 +57,7 @@ from .const import (
 )
 from .obdii.transport_ble import TransportBLE
 from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
-from .enhanced_commands import available_enhanced_commands, get_command
+from .enhanced_commands import available_enhanced_commands, command_label, get_command
 from .sensor import get_list_of_units, propose_icon_from_command, propose_sensor_device_class, propose_sensor_state_class
 
 _LOGGER = logging.getLogger(__name__)
@@ -158,16 +158,27 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ble_device: BLEDevice | None = async_ble_device_from_address(
                 self.hass, self._discovery_info.address, True
             )
-            assert ble_device is not None, "Device disappeared after selection - this should not happen"
-            self._transport = TransportBLE(
-                ble_device=ble_device,
-                uuid_write=self._characteristic_uuid_write,
-                uuid_read=self._characteristic_uuid_read,
-                loop=self.hass.loop,
-            )
-            await self._transport.async_connect()
+            if ble_device is None:
+                errors["base"] = "device_not_found"
+            else:
+                self._transport = TransportBLE(
+                    ble_device=ble_device,
+                    uuid_write=self._characteristic_uuid_write,
+                    uuid_read=self._characteristic_uuid_read,
+                    loop=self.hass.loop,
+                )
+                try:
+                    await self._transport.async_connect()
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to connect to %s during setup: %s",
+                        self._discovery_info.name,
+                        err,
+                    )
+                    errors["base"] = "cannot_connect"
+                else:
+                    return await self.async_step_connection()
 
-            return await self.async_step_connection()
 
         if discovery := self._discovery_info:
             self._discovered_devices[discovery.address] = discovery
@@ -393,7 +404,7 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                             options=[
                                 {
                                     "value": command.name,
-                                    "label": f"{command.name} ({command.mode} {command.pid})"
+                                    "label": f"{command_label(command)} ({command.mode} {command.pid})"
                                 } for command in commands],
                             mode=selector.SelectSelectorMode.DROPDOWN,
                             translation_key="commands",
@@ -433,7 +444,7 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         return self.async_show_form(
             step_id="commands_config",
             description_placeholders={
-                "command_name": " ".join(self._command.name.replace("_", " ").split()).capitalize()
+                "command_name": command_label(self._command)
             },
             data_schema=vol.Schema(
                 {

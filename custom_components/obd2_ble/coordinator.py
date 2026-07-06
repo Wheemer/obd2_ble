@@ -1,6 +1,6 @@
 """Coordinator for OBD2 BLE."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any
 
@@ -66,8 +66,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._supported_pids = []
         self._supported_cmds = []
         self._last_fetch_successful = False
+        self.last_successful_update: datetime | None = None
+        self.last_error: str | None = None
 
-        self.transport: TransportBLE | None = None 
+        self.transport: TransportBLE | None = None
         self.api: Connection | None = None
         self.active_commands: set[Command] = set()
 
@@ -97,7 +99,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         )
 
         if ble_device is None:
-            _LOGGER.warning("Failed to discover device %s via Bluetooth", address)
+            self.last_error = f"Failed to discover device {address} via Bluetooth"
+            _LOGGER.warning(self.last_error)
             return False
 
         entry_data = dict(self.config_entry.data)
@@ -136,7 +139,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             if self.api is not None and self.api.is_connected():
                 await self.hass.async_add_executor_job(self.api.close)
         except Exception as err:
-            _LOGGER.warning(f"Error occurred while closing API connection: {err}")
+            self.last_error = f"Error occurred while closing API connection: {err}"
+            _LOGGER.warning(self.last_error)
         else:
             _LOGGER.debug("API connection closed successfully")
 
@@ -150,6 +154,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         _LOGGER.debug("Check if the device is still available")
         available = async_address_present(self.hass, self.config_entry.unique_id, connectable=True)
         if not available:
+            self.last_error = "Bluetooth device is not currently present"
             _LOGGER.debug("Car out of range? Switch to extra slow polling")
             self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
             _LOGGER.debug(
@@ -173,6 +178,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if not self.api.is_connected():
                     raise UpdateFailed("No connection to OBD2 after connect attempt")
             except Exception as err:
+                self.last_error = f"Error connecting with OBD2: {err}"
                 raise UpdateFailed(f"Error connecting with OBD2: {err}")
 
         _LOGGER.debug("Device is connected, proceed to query data")
@@ -192,6 +198,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     else:
                         _LOGGER.warning("Received empty response for command %s", command)
                 except Exception as err:
+                    self.last_error = f"Error occurred while querying command {command}: {err}"
                     _LOGGER.error(f"Error occurred while querying command {command}: {err}")
             if len(new_data) == 0:
                 self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
@@ -201,6 +208,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 )
             else:
                 self._last_fetch_successful = True
+                self.last_error = None
+                self.last_successful_update = datetime.now(UTC)
                 self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_FAST_POLL, DEFAULT_FAST_POLL))
                 _LOGGER.debug(
                     "Car is on, polling: interval = %s",
@@ -256,6 +265,16 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     def car_connected(self) -> bool:
         return self._last_fetch_successful and self.ble_connected()
 
+    def update_interval_seconds(self) -> int | None:
+        """Return the current coordinator polling interval in seconds."""
+        if self.update_interval is None:
+            return None
+        return int(self.update_interval.total_seconds())
+
+    def active_command_count(self) -> int:
+        """Return the number of commands currently registered by entities."""
+        return len(self.active_commands)
+
     async def async_force_update(self) -> bool:
         """Force an update of the coordinator data by calling the update method directly."""
         try:
@@ -264,5 +283,6 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 _LOGGER.info("Successfully connected to the car during forced update")
                 return True
         except Exception as err:
+            self.last_error = f"Error during forced update: {err}"
             _LOGGER.error(f"Error during forced update: {err}")
         return False

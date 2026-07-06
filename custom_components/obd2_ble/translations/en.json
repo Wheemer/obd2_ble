@@ -35,6 +35,7 @@
     },
     "error": {
       "missing_unique_id": "Critical connection error: The configuration entry lacks a valid unique Bluetooth MAC address identifier.",
+      "cannot_connect": "Could not connect to the selected OBD-II adapter. Verify it is powered, nearby, and not connected to another app.",
       "device_not_found": "Could not establish an over-the-air link to the device with MAC address {mac}. Verify it is powered and in range."
     }
   },

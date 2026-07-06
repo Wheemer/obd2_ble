@@ -1,8 +1,8 @@
 """Sensor platform for OBD2 BLE."""
 
 import logging
-# from typing import Any
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from obdii import Command, Response
 
@@ -12,8 +12,10 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
+from homeassistant.const import CONF_ADDRESS, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import Obd2BleConfigEntry
 from .const import (
@@ -25,7 +27,7 @@ from .const import (
     ICON_KEYWORDS
 )
 from .coordinator import Obd2BleDataUpdateCoordinator
-from .enhanced_commands import get_command
+from .enhanced_commands import command_label, get_command
 from .entity import ObdBleEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -100,9 +102,31 @@ class Obd2BleSensorEntityConfig:
         self.command = command
         self.description = SensorEntityDescription(
             key=command.name,
-            name=name or " ".join(command.name.replace("_", " ").split()).capitalize(),
+            name=name or command_label(command),
             icon=icon,
             native_unit_of_measurement=unit,
+            **kwargs,
+        )
+
+
+class Obd2BleDiagnosticSensorEntityConfig:
+    def __init__(
+        self,
+        key: str,
+        name: str,
+        value_fn: Callable[[], Any],
+        icon: str | None = None,
+        unit: str | None = None,
+        **kwargs,
+    ) -> None:
+        self.key = key
+        self.value_fn = value_fn
+        self.description = SensorEntityDescription(
+            key=key,
+            name=name,
+            icon=icon,
+            native_unit_of_measurement=unit,
+            entity_category=EntityCategory.DIAGNOSTIC,
             **kwargs,
         )
 
@@ -150,6 +174,33 @@ async def async_setup_entry(
         ObdBleSensor(coordinator, entry, sensor)
         for sensor in sensor_commands
     ]
+    entities.extend(
+        [
+            ObdBleDiagnosticSensor(
+                coordinator,
+                entry,
+                Obd2BleDiagnosticSensorEntityConfig(
+                    key="active_command_count",
+                    name="Active command count",
+                    value_fn=coordinator.active_command_count,
+                    icon="mdi:counter",
+                    state_class=SensorStateClass.MEASUREMENT,
+                ),
+            ),
+            ObdBleDiagnosticSensor(
+                coordinator,
+                entry,
+                Obd2BleDiagnosticSensorEntityConfig(
+                    key="polling_interval",
+                    name="Polling interval",
+                    value_fn=coordinator.update_interval_seconds,
+                    icon="mdi:timer-sync-outline",
+                    unit="s",
+                    state_class=SensorStateClass.MEASUREMENT,
+                ),
+            ),
+        ]
+    )
     async_add_entities(entities)
 
 class ObdBleSensor(ObdBleEntity, SensorEntity):
@@ -187,6 +238,28 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
                 self._attr_available = True
                 self._attr_native_value = data.value
 
+        super()._handle_coordinator_update()
+
+
+class ObdBleDiagnosticSensor(CoordinatorEntity[Obd2BleDataUpdateCoordinator], SensorEntity):
+    """Diagnostic sensor for the OBD2 BLE coordinator."""
+
+    def __init__(
+        self,
+        coordinator: Obd2BleDataUpdateCoordinator,
+        config_entry,
+        config: Obd2BleDiagnosticSensorEntityConfig,
+    ) -> None:
+        """Initialize the diagnostic sensor."""
+        super().__init__(coordinator)
+        self._config = config
+        self._attr_device_info = coordinator.device_info
+        self._attr_unique_id = f"{config_entry.data[CONF_ADDRESS]}-diagnostic_sensor-{config.key}"
+        self.entity_description = config.description
+
+    def _handle_coordinator_update(self) -> None:
+        self._attr_native_value = self._config.value_fn()
+        self._attr_available = self._attr_native_value is not None
         super()._handle_coordinator_update()
 
 

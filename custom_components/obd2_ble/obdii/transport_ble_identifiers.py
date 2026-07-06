@@ -129,5 +129,5 @@ def advertisement_matches(
 
     return not (
         (local_name := matcher.get("local_name"))
-        and not re.compile(translate(local_name)).match(adv_data.local_name or "")
+        and not re.compile(translate(local_name), re.IGNORECASE).match(adv_data.local_name or "")
     )

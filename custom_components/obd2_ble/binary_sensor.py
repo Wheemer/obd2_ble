@@ -106,6 +106,16 @@ async def async_setup_entry(
         coordinator,
         entry,
         Obd2BleStatusBinarySensorEntityConfig(
+            function=coordinator.ble_found,
+            name="BLE Found",
+            icon="mdi:bluetooth-searching",
+            device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        )
+    ))
+    entities.append(ObdBleStatusBinarySensor(
+        coordinator,
+        entry,
+        Obd2BleStatusBinarySensorEntityConfig(
             function=coordinator.ble_connected,
             name="BLE Connected",
             icon="mdi:bluetooth",
@@ -176,7 +186,6 @@ class ObdBleStatusBinarySensor(CoordinatorEntity[Obd2BleDataUpdateCoordinator], 
         self._attr_unique_id = f"{config_entry.data[CONF_ADDRESS]}-binary_sensor-{config.function.__name__}"
         self._config = config
         self.entity_description = config.description
-        self.entitity_category = "diagnostic"
 
     # async def async_update(self) -> None:
     def _handle_coordinator_update(self) -> None:
