@@ -9,6 +9,7 @@ from typing_extensions import Final
 import voluptuous as vol
 
 from homeassistant.components import bluetooth
+from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryError, ServiceValidationError
 from homeassistant.helpers.config_validation import config_entry_only_config_schema
@@ -16,6 +17,7 @@ from homeassistant.helpers.config_validation import config_entry_only_config_sch
 from .const import (
     DOMAIN,
     ACTION_ATTEMPT_CONNECT,
+    CONF_DISCOVERY_ONLY,
     PLATFORMS,
     STARTUP_MESSAGE
 )
@@ -64,7 +66,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         hass.data[DOMAIN] = {}
         _LOGGER.info(STARTUP_MESSAGE)
 
-    if entry.unique_id is None:
+    if entry.data.get(CONF_DISCOVERY_ONLY) and CONF_ADDRESS not in entry.data:
+        _LOGGER.debug(
+            "Loaded discovery-only OBD2 BLE entry; matching Bluetooth adapters "
+            "will still surface as separate discovered devices."
+        )
+        return True
+
+    address = entry.data.get(CONF_ADDRESS) or entry.unique_id
+    if address is None:
         raise ConfigEntryError(
             translation_domain=DOMAIN,
             translation_key="missing_unique_id",
@@ -93,7 +103,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         bluetooth.async_register_callback(
             hass,
             _async_specific_device_found,
-            {"address": entry.unique_id},
+            {"address": address},
             bluetooth.BluetoothScanningMode.ACTIVE,
         )  # does the register callback, and returns a cancel callback for cleanup
     )
@@ -111,6 +121,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
 
 async def async_unload_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> bool:
     """Unload a config entry."""
+    if entry.data.get(CONF_DISCOVERY_ONLY) and getattr(entry, "runtime_data", None) is None:
+        _LOGGER.debug("Unloaded discovery-only config entry: %s", entry.unique_id)
+        return True
+
     unloaded: Final = await hass.config_entries.async_unload_platforms(
         entry, PLATFORMS
     )

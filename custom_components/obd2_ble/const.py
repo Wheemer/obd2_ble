@@ -19,6 +19,7 @@ ACTION_ATTEMPT_CONNECT = "attempt_to_connect"
 
 # Configuration and options
 CONF_AUTO_CONFIGURE = "auto_configure"
+CONF_DISCOVERY_ONLY = "discovery_only"
 CONF_CHARACTERISTIC_UUID_READ = "characteristic_uuid_read"
 CONF_CHARACTERISTIC_UUID_WRITE = "characteristic_uuid_write"
 CONF_PROTOCOL = "protocol"
@@ -39,6 +40,7 @@ CONF_STATE_CLASS = "state_class"
 
 # Defaults
 DEFAULT_NAME = DOMAIN
+DISCOVERY_ONLY_UNIQUE_ID = f"{DOMAIN}_discovery_only"
 DEFAULT_CHARACTERISTIC_UUID_READ = "0000fff1-0000-1000-8000-00805f9b34fb"
 DEFAULT_CHARACTERISTIC_UUID_WRITE = "0000fff1-0000-1000-8000-00805f9b34fb"
 DEFAULT_CACHED_VALUES = False

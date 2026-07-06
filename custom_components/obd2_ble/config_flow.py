@@ -35,9 +35,11 @@ from .const import (
     CONF_AUTO_CONFIGURE,
     CONF_CHARACTERISTIC_UUID_READ,
     CONF_CHARACTERISTIC_UUID_WRITE,
+    CONF_DISCOVERY_ONLY,
     CONF_PROTOCOL,
     DEFAULT_CHARACTERISTIC_UUID_READ,
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
+    DISCOVERY_ONLY_UNIQUE_ID,
 
     CONF_CACHED_VALUES,
     CONF_FAST_POLL,
@@ -127,6 +129,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            if CONF_ADDRESS not in user_input:
+                await self.async_set_unique_id(DISCOVERY_ONLY_UNIQUE_ID)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title="OBD2 BLE Discovery",
+                    data={CONF_DISCOVERY_ONLY: True},
+                )
+
             self._discovery_info = self._discovered_devices[user_input[CONF_ADDRESS]]
             await self.async_set_unique_id(
                 self._discovery_info.address, raise_on_progress=False
@@ -180,7 +190,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._discovered_devices[discovery.address] = discovery
 
         if not self._discovered_devices:
-            return self.async_abort(reason="no_unconfigured_devices")
+            return self.async_show_form(
+                step_id="discovery_only",
+                data_schema=vol.Schema({}),
+                errors=errors,
+                description_placeholders={},
+            )
 
         data_schema = vol.Schema(
             {
@@ -199,6 +214,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=data_schema,
             errors=errors,
+        )
+
+    async def async_step_discovery_only(
+        self, user_input: dict | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Create a setup entry that only enables Bluetooth discovery."""
+        if user_input is not None:
+            await self.async_set_unique_id(DISCOVERY_ONLY_UNIQUE_ID)
+            self._abort_if_unique_id_configured()
+            return self.async_create_entry(
+                title="OBD2 BLE Discovery",
+                data={CONF_DISCOVERY_ONLY: True},
+            )
+
+        return self.async_show_form(
+            step_id="discovery_only",
+            data_schema=vol.Schema({}),
         )
 
     async def async_step_connection(

@@ -21,6 +21,10 @@
           "auto_configure": "Attempt automatic profile detection."
         }
       },
+      "discovery_only": {
+        "title": "Wait for OBD2 BLE discovery",
+        "description": "No unconfigured OBD2 BLE adapters are active right now. Submit to add OBD2 BLE and let Home Assistant show matching adapters as discovered devices when Bluetooth sees them."
+      },
       "connection": {
         "title": "Configure Connection",
         "description": "Set up the Bluetooth connection parameters for your OBD-II device.",
