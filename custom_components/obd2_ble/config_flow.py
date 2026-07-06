@@ -9,7 +9,6 @@ except ImportError:  # pragma: no cover - fallback for missing dependency
     def human_readable_name(_manufacturer: str | None, name: str | None, address: str):
         """Fallback if bluetooth_data_tools is unavailable."""
         return name or address
-from dataclasses import dataclass
 import voluptuous as vol
 
 from bleak.backends.device import BLEDevice
@@ -28,6 +27,7 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry, selector
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from . import Obd2BleConfigEntry
 from .const import (
@@ -63,19 +63,6 @@ from .sensor import get_list_of_units, propose_icon_from_command, propose_sensor
 _LOGGER = logging.getLogger(__name__)
 
 
-@dataclass
-class DiscoveredDevice:
-    """A discovered Bluetooth device."""
-
-    name: str
-    discovery_info: BluetoothServiceInfoBleak
-    type: str
-
-    def model(self) -> str:
-        """Return BMS type in capital letters, e.g. 'DUMMY OBDII'."""
-        return self.type.rsplit(".", 1)[1].replace("_", " ").upper()
-
-
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow handler."""
 
@@ -87,7 +74,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._errors = {}
         self._discovery_info: BluetoothServiceInfoBleak | None = None
         self._discovered_devices: dict[str, BluetoothServiceInfoBleak] = {}
-        # self._discovered_devices: dict[str, DiscoveredDevice] = {}
         self._characteristic_uuid_read: str = DEFAULT_CHARACTERISTIC_UUID_READ
         self._characteristic_uuid_write: str = DEFAULT_CHARACTERISTIC_UUID_WRITE
         self._protocol: int = Protocol.AUTO.value
@@ -389,9 +375,17 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
             self._configured_commands = [] # Reset our configuration queue storage
             return await self.async_step_commands_config()
 
-        _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
+        try:
+            _, commands = await self.config_entry.runtime_data.async_get_all_pid_commands(force_refresh=True)
+        except UpdateFailed as err:
+            _LOGGER.warning("Could not refresh supported OBD commands: %s", err)
+            commands = []
         if pre_configured := self._options.get(CONF_COMMANDS):
-            commands = list(set(commands) | set([get_command(cmd[CONF_COMMAND]) for cmd in pre_configured]))
+            for cmd in pre_configured:
+                try:
+                    commands.append(get_command(cmd[CONF_COMMAND]))
+                except KeyError:
+                    _LOGGER.warning("Configured command %s is no longer available", cmd[CONF_COMMAND])
         commands = list(set(commands) | set(available_enhanced_commands()))
         commands = sorted(commands, key=lambda cmd: (cmd.name, cmd.mode, cmd.pid))
 

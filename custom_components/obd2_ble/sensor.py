@@ -199,6 +199,17 @@ async def async_setup_entry(
                     state_class=SensorStateClass.MEASUREMENT,
                 ),
             ),
+            ObdBleDiagnosticSensor(
+                coordinator,
+                entry,
+                Obd2BleDiagnosticSensorEntityConfig(
+                    key="last_successful_update",
+                    name="Last successful update",
+                    value_fn=lambda: coordinator.last_successful_update,
+                    icon="mdi:clock-check-outline",
+                    device_class=SensorDeviceClass.TIMESTAMP,
+                ),
+            ),
         ]
     )
     async_add_entities(entities)
@@ -261,21 +272,3 @@ class ObdBleDiagnosticSensor(CoordinatorEntity[Obd2BleDataUpdateCoordinator], Se
         self._attr_native_value = self._config.value_fn()
         self._attr_available = self._attr_native_value is not None
         super()._handle_coordinator_update()
-
-
-# class ObdBleDiagSensor(ObdBleEntity, SensorEntity):
-#     """Config entry for obd2_ble diagnostic sensors."""
-
-#     def __init__(
-#         self,
-#         coordinator: Obd2BleDataUpdateCoordinator,
-#         config_entry,
-#         id: str,
-#         description: SensorEntityDescription,
-#     ) -> None:
-#         """Initialize the sensor."""
-#         super().__init__(coordinator, config_entry, id, description.icon, id, DOMAIN)
-#         self._id = id
-#         self._description = description
-#         self._attr_name = f"{NAME} {description.name}"
-#         self._attr_entity_category = EntityCategory.DIAGNOSTIC

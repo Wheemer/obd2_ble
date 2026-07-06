@@ -2,7 +2,13 @@
 "services": {
     "attempt_to_connect": {
       "name": "Attempt to connect to car",
-      "description": "Connects briefly to check if the car is reachable. Useful if long polling intervals are used and you have indication that the car is reachable again."
+      "description": "Connects briefly to check if the car is reachable. Useful if long polling intervals are used and you have indication that the car is reachable again.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional OBD2 BLE config entry ID. Required when multiple OBD2 BLE adapters are configured."
+        }
+      }
     }
   },
   "config": {
