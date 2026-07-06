@@ -10,7 +10,6 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_CHARACTERISTIC_UUID_READ,
-    CONF_DISCOVERY_ONLY,
     CONF_CHARACTERISTIC_UUID_WRITE,
     CONF_HW_VERSION,
 )
@@ -28,24 +27,12 @@ async def async_get_config_entry_diagnostics(
     entry: Obd2BleConfigEntry,
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator = getattr(entry, "runtime_data", None)
-    if coordinator is None:
-        return {
-            "entry": {
-                "title": entry.title,
-                "data": async_redact_data(dict(entry.data), TO_REDACT),
-                "options": async_redact_data(dict(entry.options), TO_REDACT),
-                "discovery_only": entry.data.get(CONF_DISCOVERY_ONLY, False),
-            },
-            "coordinator": None,
-        }
-
+    coordinator = entry.runtime_data
     return {
         "entry": {
             "title": entry.title,
             "data": async_redact_data(dict(entry.data), TO_REDACT),
             "options": async_redact_data(dict(entry.options), TO_REDACT),
-            "discovery_only": entry.data.get(CONF_DISCOVERY_ONLY, False),
         },
         "coordinator": {
             "ble_found": coordinator.ble_found(),
