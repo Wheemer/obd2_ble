@@ -81,11 +81,11 @@ class VeepeakOBD2_BLE(OBD2_BLE):
 
     @staticmethod
     def uuid_rx() -> str:
-        return "0000fff2-0000-1000-8000-00805f9b34fb"
+        return "0000fff1-0000-1000-8000-00805f9b34fb"
 
     @staticmethod
     def uuid_tx() -> str:
-        return "0000fff1-0000-1000-8000-00805f9b34fb"
+        return "0000fff2-0000-1000-8000-00805f9b34fb"
 
 
 AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [OBD2_BLE, VlinkOBD2_BLE, VeepeakOBD2_BLE]
