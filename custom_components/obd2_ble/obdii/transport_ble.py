@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from bleak import BleakClient
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
 from bleak.backends.service import BleakGATTServiceCollection
 from bleak_retry_connector import establish_connection, BleakClientWithServiceCache
@@ -40,6 +41,8 @@ class TransportBLE(TransportBase):
 
         self._ble_device = ble_device
         self._ble_conn: Optional[BleakClient] = None
+        self._read_char: BleakGATTCharacteristic | None = None
+        self._write_char: BleakGATTCharacteristic | None = None
         self._buffer = bytearray()
         self._lock = Lock()
         self._data_ready = Event()
@@ -59,6 +62,37 @@ class TransportBLE(TransportBase):
             self._buffer.extend(data)
         self._data_ready.set()
 
+    def _resolve_characteristic(
+        self,
+        uuid: str,
+        preferred_properties: set[str],
+    ) -> BleakGATTCharacteristic:
+        if self._ble_conn is None:
+            raise RuntimeError("BLE connection is not established.")
+
+        matches: list[BleakGATTCharacteristic] = []
+        for service in self._ble_conn.services:
+            matches.extend(
+                characteristic
+                for characteristic in service.characteristics
+                if characteristic.uuid.lower() == uuid.lower()
+            )
+
+        if not matches:
+            raise ValueError(f"Characteristic {uuid} was not found.")
+
+        for characteristic in matches:
+            if preferred_properties.intersection(characteristic.properties):
+                return characteristic
+
+        if len(matches) == 1:
+            return matches[0]
+
+        raise ValueError(
+            f"Multiple characteristics found for {uuid}, but none have "
+            f"any of the required properties: {sorted(preferred_properties)}"
+        )
+
     async def async_connect(self) -> None:
         _LOGGER.debug("Attempting to connect to BLE device %s (%s)", self._ble_device.name, self._ble_device.address)
         self._ble_conn = await establish_connection(
@@ -67,18 +101,30 @@ class TransportBLE(TransportBase):
             self._ble_device.name or "Unknown Device",
             max_attempts=3
         )
-        await self._ble_conn.start_notify(self.config["uuid_read"], self._notify_callback)
+        self._read_char = self._resolve_characteristic(
+            self.config["uuid_read"],
+            {"notify", "indicate"},
+        )
+        self._write_char = self._resolve_characteristic(
+            self.config["uuid_write"],
+            {"write", "write-without-response"},
+        )
+        await self._ble_conn.start_notify(self._read_char, self._notify_callback)
 
     async def async_close(self) -> None:
         if self._ble_conn and self._ble_conn.is_connected:
-            await self._ble_conn.stop_notify(self.config["uuid_read"])
+            await self._ble_conn.stop_notify(self._read_char or self.config["uuid_read"])
             await self._ble_conn.disconnect()
+        self._read_char = None
+        self._write_char = None
         self._ble_conn = None
 
     async def _write(self, query: bytes) -> None:
         if self._ble_conn is None:
             raise RuntimeError("BLE connection is not established.")
-        await self._ble_conn.write_gatt_char(self.config["uuid_write"], query)
+        if self._write_char is None:
+            raise RuntimeError("BLE write characteristic is not resolved.")
+        await self._ble_conn.write_gatt_char(self._write_char, query)
 
     def get_service_collection(self) -> BleakGATTServiceCollection:
         if self._ble_conn is None:
