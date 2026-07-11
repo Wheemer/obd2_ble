@@ -72,7 +72,7 @@ Veepeak BLE/BLE+ note:
 - Service UUID: `0000fff0-0000-1000-8000-00805f9b34fb`
 - Input/read/notify characteristic: `0000fff1-0000-1000-8000-00805f9b34fb`
 - Output/write characteristic: `0000fff2-0000-1000-8000-00805f9b34fb`
-- This mapping matches the Car Scanner ELM OBD2 Android app's Veepeak BLE profile. Some Veepeak adapters expose duplicate UUIDs, so the integration selects the characteristic object whose BLE properties match the needed direction instead of using only the UUID string.
+- This mapping matches the Car Scanner ELM OBD2 Android app's Veepeak BLE profile. Some Veepeak adapters expose duplicate UUIDs, so the integration selects the characteristic object whose BLE properties match the needed direction instead of using only the UUID string. Writes are split into 17-byte chunks to match the app's BLE transport behavior.
 
 ## Enhanced PIDs
 

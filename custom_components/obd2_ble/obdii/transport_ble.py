@@ -15,6 +15,7 @@ from obdii.transports.transport_base import TransportBase
 from obdii.basetypes import MISSING
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
+BLE_WRITE_CHUNK_SIZE = 17
 
 class TransportBLE(TransportBase):
     def __init__(
@@ -146,7 +147,11 @@ class TransportBLE(TransportBase):
             raise RuntimeError("BLE connection is not established.")
         if self._write_char is None:
             raise RuntimeError("BLE write characteristic is not resolved.")
-        await self._ble_conn.write_gatt_char(self._write_char, query)
+        for offset in range(0, len(query), BLE_WRITE_CHUNK_SIZE):
+            await self._ble_conn.write_gatt_char(
+                self._write_char,
+                query[offset : offset + BLE_WRITE_CHUNK_SIZE],
+            )
 
     def get_service_collection(self) -> BleakGATTServiceCollection:
         if self._ble_conn is None:
