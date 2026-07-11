@@ -197,12 +197,18 @@ class TransportBLE(TransportBase):
         while True:
             remaining = deadline - monotonic()
             if remaining <= 0:
-                raise TimeoutError("read timed out.")
+                with self._lock:
+                    snapshot = bytes(self._buffer)
+                raise TimeoutError(
+                    f"read timed out waiting for {expected_seq!r}; received {snapshot!r}"
+                )
 
             with self._lock:
                 snapshot = bytes(self._buffer)
 
-            if snapshot[-lenterm:] == expected_seq:
+            if snapshot[-lenterm:] == expected_seq or (
+                expected_seq == b">" and expected_seq in snapshot
+            ):
                 break
             if size is not MISSING and len(snapshot) >= size:
                 break

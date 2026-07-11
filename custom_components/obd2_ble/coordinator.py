@@ -42,6 +42,7 @@ except ImportError:
     FAKE_COMMANDS: list[Command] = []
 
 _LOGGER = logging.getLogger(__name__)
+ECU_HEALTH_COMMAND = veh_commands["ENGINE_SPEED"]
 
 type Obd2BleConfigEntry = ConfigEntry[Obd2BleDataUpdateCoordinator]
 
@@ -86,21 +87,11 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         # self._connect_ble()
 
-    def _connect_ble(self) -> bool:
+    def _connect_ble(self, ble_device: BLEDevice) -> bool:
         """Connect to the BLE device."""
 
         if not self.config_entry or not self.config_entry.unique_id:
             _LOGGER.error("No config entry available for coordinator")
-            return False
-        address = self.config_entry.unique_id
-
-        ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
-            self.hass, address, True
-        )
-
-        if ble_device is None:
-            self.last_error = f"Failed to discover device {address} via Bluetooth"
-            _LOGGER.warning(self.last_error)
             return False
 
         entry_data = dict(self.config_entry.data)
@@ -127,7 +118,6 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         if hw_version is not None:
             entry_data[CONF_HW_VERSION] = hw_version.value if hw_version else None
             self.device_info["hw_version"] = hw_version.value if hw_version else None
-            self.hass.config_entries.async_update_entry(self.config_entry, data=entry_data)
 
         return True
 
@@ -187,16 +177,31 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             return {}
         
         if self.api is None:
+            ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
+                self.hass, address, True
+            )
+            if ble_device is None:
+                self.last_error = f"Failed to discover device {address} via Bluetooth"
+                self.update_interval = timedelta(
+                    seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
+                )
+                _LOGGER.debug(self.last_error)
+                if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+                    return self._cache_data
+                return {}
             try:
-                connected = self._connect_ble()
+                connected = await self.hass.async_add_executor_job(
+                    self._connect_ble, ble_device
+                )
             except Exception as err:
-                self.last_error = f"Error connecting with OBD2: {err}"
+                self.last_error = f"Error connecting with OBD2: {err!r}"
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
                 _LOGGER.debug(
-                    "OBD2 adapter is visible but the car is not responding; retrying in %s",
+                    "OBD2 adapter is visible but not responding; retrying in %s: %r",
                     self.update_interval,
+                    err,
                 )
                 if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                     return self._cache_data
@@ -216,13 +221,14 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if not self.api.is_connected():
                     raise UpdateFailed("No connection to OBD2 after connect attempt")
             except Exception as err:
-                self.last_error = f"Error connecting with OBD2: {err}"
+                self.last_error = f"Error connecting with OBD2: {err!r}"
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
                 _LOGGER.debug(
-                    "OBD2 adapter is visible but the car is not responding; retrying in %s",
+                    "OBD2 adapter is visible but not responding; retrying in %s: %r",
                     self.update_interval,
+                    err,
                 )
                 if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                     return self._cache_data
@@ -232,9 +238,25 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         try:
             self._last_fetch_successful = False
             new_data: dict[str, Response] = {}
+            ecu_response: Response | None = None
+            try:
+                _LOGGER.debug("Querying OBD2 health probe %s", ECU_HEALTH_COMMAND)
+                ecu_response = await self.hass.async_add_executor_job(
+                    self.api.query, ECU_HEALTH_COMMAND
+                )
+                _LOGGER.debug("Received health probe response: %s", ecu_response)
+            except Exception as err:
+                self.last_error = f"Error occurred while querying ECU health probe: {err}"
+                _LOGGER.debug("ECU health probe failed: %s", err)
+
+            ecu_detected = ecu_response is not None and ecu_response.value is not None
             for command in self.active_commands:
                 if command is None:
                     _LOGGER.warning("Skipping invalid command: %s", command)
+                    continue
+                if command == ECU_HEALTH_COMMAND:
+                    if ecu_detected:
+                        new_data[str(command)] = ecu_response
                     continue
                 try:
                     _LOGGER.debug("Querying OBD2 for command %s", command)
@@ -247,7 +269,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 except Exception as err:
                     self.last_error = f"Error occurred while querying command {command}: {err}"
                     _LOGGER.error(f"Error occurred while querying command {command}: {err}")
-            if len(new_data) == 0:
+            if not ecu_detected and len(new_data) == 0:
                 self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
                 _LOGGER.debug(
                     "Car is probably off, switch to slow polling: interval = %s",
