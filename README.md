@@ -54,18 +54,23 @@ This integration supports OBD2 BLE dongles that advertise as:
 - `OBDII`
 - `VEEPEAK`
 - `Veepeak`
+- `Viecar`
+- `Kiwi`
 
 Supported BLE service UUIDs:
 
 - `0000ffe0-0000-1000-8000-00805f9b34fb`
 - `0000fff0-0000-1000-8000-00805f9b34fb`
 - `000018f0-0000-1000-8000-00805f9b34fb`
+- `e47c8027-cca1-4e3b-981f-bdc47abeb5b5`
 
 Known device profiles:
 
 - Generic OBD-II BLE adapters using service `FFF0` and characteristics `FFF1`/`FFF2`
 - Vgate/V-LINK-style adapters using service `18F0` and characteristics `18F1`/`18F2`
 - Veepeak OBDCheck BLE/BLE+ adapters advertising as `VEEPEAK` using service `FFF0` and characteristics `FFF1`/`FFF2`
+- Viecar adapters advertising as `Viecar` using service `FFF0` and characteristics `FFF1`/`FFF2`
+- Kiwi 3 adapters advertising as `Kiwi` using service `e47c8027-cca1-4e3b-981f-bdc47abeb5b5`, input `cacc07ff-ffff-4c48-8fae-a9ef71b75e26`, and output `1cce1ea8-bd34-4813-a00a-c76e028fadcb`
 
 Veepeak BLE/BLE+ note:
 

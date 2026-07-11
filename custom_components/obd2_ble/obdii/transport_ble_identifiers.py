@@ -88,7 +88,41 @@ class VeepeakOBD2_BLE(OBD2_BLE):
         return "0000fff2-0000-1000-8000-00805f9b34fb"
 
 
-AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [OBD2_BLE, VlinkOBD2_BLE, VeepeakOBD2_BLE]
+class ViecarOBD2_BLE(OBD2_BLE):
+    @staticmethod
+    def matcher_dict_list() -> list[MatcherPattern]:
+        """Provide BluetoothMatcher definition for Viecar BLE adapters."""
+        return [{
+            "local_name": "Viecar*",
+            "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
+        }]
+
+
+class Kiwi3OBD2_BLE(BaseOBD2):
+    @staticmethod
+    def matcher_dict_list() -> list[MatcherPattern]:
+        """Provide BluetoothMatcher definition for Kiwi 3 BLE adapters."""
+        return [{
+            "local_name": "Kiwi*",
+            "service_uuid": "e47c8027-cca1-4e3b-981f-bdc47abeb5b5"
+        }]
+
+    @staticmethod
+    def uuid_rx() -> str:
+        return "cacc07ff-ffff-4c48-8fae-a9ef71b75e26"
+
+    @staticmethod
+    def uuid_tx() -> str:
+        return "1cce1ea8-bd34-4813-a00a-c76e028fadcb"
+
+
+AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [
+    OBD2_BLE,
+    VlinkOBD2_BLE,
+    VeepeakOBD2_BLE,
+    ViecarOBD2_BLE,
+    Kiwi3OBD2_BLE,
+]
 
 def advertisement_matches(
     matcher: MatcherPattern,

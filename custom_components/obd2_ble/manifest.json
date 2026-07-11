@@ -15,6 +15,12 @@
       "local_name": "Veepeak*"
     },
     {
+      "local_name": "Viecar*"
+    },
+    {
+      "local_name": "Kiwi*"
+    },
+    {
       "service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"
     },
     {
@@ -22,6 +28,9 @@
     },
     {
       "service_uuid": "000018f0-0000-1000-8000-00805f9b34fb"
+    },
+    {
+      "service_uuid": "e47c8027-cca1-4e3b-981f-bdc47abeb5b5"
     }
   ],
   "codeowners": ["@dala318"],
