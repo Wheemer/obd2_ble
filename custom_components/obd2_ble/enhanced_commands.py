@@ -4,10 +4,19 @@ from obdii import Command, commands as veh_commands
 from obdii.parsers.formula import Formula
 
 
-def _command(name: str, mode: int, pid: str, unit: str, formula: str) -> Command:
+def _command(
+    name: str,
+    mode: int,
+    pid: str,
+    unit: str,
+    formula: str,
+    *,
+    obd_header: str | None = None,
+) -> Command:
     """Create a named command without patching py-obdii's registry."""
     command = Command(mode, pid, 2, None, None, unit, Formula(formula))
     command.name = name
+    command.obd_header = obd_header
     return command
 
 
@@ -25,15 +34,34 @@ HONDA_ATF_TEMP_9023 = _command(
     "°C",
     "B-40",
 )
+HONDA_ATF_TEMP_2201 = _command(
+    "HONDA_ATF_TEMP_2201",
+    0x22,
+    "2201",
+    "°C",
+    "B-40",
+)
+HONDA_ATF_TEMP_2201_TCM_7E1 = _command(
+    "HONDA_ATF_TEMP_2201_TCM_7E1",
+    0x22,
+    "2201",
+    "°C",
+    "B-40",
+    obd_header="7E1",
+)
 
 ENHANCED_COMMANDS: dict[str, Command] = {
     HONDA_ATF_TEMP_8220.name: HONDA_ATF_TEMP_8220,
     HONDA_ATF_TEMP_9023.name: HONDA_ATF_TEMP_9023,
+    HONDA_ATF_TEMP_2201.name: HONDA_ATF_TEMP_2201,
+    HONDA_ATF_TEMP_2201_TCM_7E1.name: HONDA_ATF_TEMP_2201_TCM_7E1,
 }
 
 ENHANCED_COMMAND_LABELS: dict[str, str] = {
     HONDA_ATF_TEMP_8220.name: "Honda ATF temperature candidate 8220",
     HONDA_ATF_TEMP_9023.name: "Honda ATF temperature candidate 9023",
+    HONDA_ATF_TEMP_2201.name: "Honda ATF Temp 2201",
+    HONDA_ATF_TEMP_2201_TCM_7E1.name: "Honda ATF Temp 2201 TCM",
 }
 
 COMMAND_LABELS: dict[str, str] = {

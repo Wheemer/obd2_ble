@@ -87,10 +87,13 @@ standard OBD-II supported PID list.
 
 Experimental Honda/Acura automatic transmission fluid temperature candidates:
 
+- `HONDA_ATF_TEMP_2201`: request `22 22 01`, Celsius equation `AA - 40`
+- `HONDA_ATF_TEMP_2201_TCM_7E1`: request `22 22 01` sent to CAN header
+  `7E1`, Celsius equation `AA - 40`
 - `HONDA_ATF_TEMP_8220`: request `22 82 20`, Celsius equation `A - 40`
 - `HONDA_ATF_TEMP_9023`: request `22 90 23`, Celsius equation `A - 40`
 
-Internally these commands use the equivalent `B - 40` formula because
+Internally these service-22 commands use the equivalent `B - 40` formula because
 `py-obdii` keeps the second service-22 PID byte in the decoded payload.
 
 These are not guaranteed for every Honda/Acura model. Validate by comparing a

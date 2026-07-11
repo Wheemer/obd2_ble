@@ -71,6 +71,7 @@ EXPECTED_PROBE_LOGGERS = (
     "obdii.protocols.protocol_base",
     "obdii.protocols.mixins",
 )
+DEFAULT_FUNCTIONAL_CAN_HEADER = "7DF"
 
 
 @contextmanager
@@ -118,6 +119,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._protocol_candidate_index = 0
         self._last_requested_protocol: Protocol | None = None
         self._last_active_protocol: Protocol | None = None
+        self._active_obd_header: str | None = None
 
         if not entry or not entry.unique_id:
             raise ConditionError("No unique_id found in config entry")
@@ -173,6 +175,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             finally:
                 self.api = None
                 self.transport = None
+                self._active_obd_header = None
 
     def _connect_ble(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
         """Connect to the BLE device."""
@@ -202,6 +205,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         self._last_requested_protocol = protocol
         self.api.connect()
+        self._active_obd_header = None
         self._last_active_protocol = self.api.protocol
         hw_version = self.api.query(at_commands.VERSION_ID)
         if hw_version is not None:
@@ -215,7 +219,47 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         if self.api is None:
             raise ConnectionError("No OBD2 API connection")
         with _suppress_expected_probe_logs():
+            requested_header = getattr(command, "obd_header", None)
+            if requested_header is not None:
+                self._set_obd_header(requested_header)
+            elif self._active_obd_header is not None:
+                self._set_obd_header(DEFAULT_FUNCTIONAL_CAN_HEADER)
             return self.api.query(command)
+
+    def _set_obd_header(self, header: str) -> None:
+        """Set the ELM request header when an enhanced PID needs a module target."""
+        if self.api is None:
+            raise ConnectionError("No OBD2 API connection")
+
+        normalized = header.replace(" ", "").upper()
+        if normalized == self._active_obd_header:
+            return
+
+        if len(normalized) == 3:
+            command = at_commands.SET_HEADER_11.format(
+                x=normalized[0],
+                y=normalized[1],
+                z=normalized[2],
+            )
+        elif len(normalized) == 6:
+            command = at_commands.SET_HEADER.format(
+                xx=normalized[0:2],
+                yy=normalized[2:4],
+                zz=normalized[4:6],
+            )
+        elif len(normalized) == 8:
+            command = at_commands.SET_HEADER_29.format(
+                ww=normalized[0:2],
+                xx=normalized[2:4],
+                yy=normalized[4:6],
+                zz=normalized[6:8],
+            )
+        else:
+            raise ValueError(f"Unsupported OBD header length: {header}")
+
+        _LOGGER.debug("Setting OBD request header to %s", normalized)
+        self.api.query(command)
+        self._active_obd_header = normalized
 
     def _query_ecu_health(self) -> tuple[Command | None, Response | None]:
         """Probe for a live ECU using a few standard commands."""
@@ -400,7 +444,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     if response is not None and response.value is not None:
                         new_data[str(command)] = response
                     else:
-                        _LOGGER.warning("Received empty response for command %s", command)
+                        _LOGGER.debug("Received empty response for command %s", command)
                 except (ResponseError, TimeoutError) as err:
                     self.last_error = f"Command {command} did not return data: {err}"
                     _LOGGER.debug("Command %s did not return data: %s", command, err)
