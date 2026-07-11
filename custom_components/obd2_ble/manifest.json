@@ -3,10 +3,10 @@
   "name": "OBD2 BLE",
   "bluetooth": [
     {
-      "local_name": "OBD2"
+      "local_name": "OBD2*"
     },
     {
-      "local_name": "OBDII"
+      "local_name": "OBDII*"
     },
     {
       "local_name": "VEEPEAK*"

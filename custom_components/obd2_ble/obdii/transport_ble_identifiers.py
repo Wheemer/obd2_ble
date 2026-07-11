@@ -38,10 +38,16 @@ class OBD2_BLE(BaseOBD2):
     @staticmethod
     def matcher_dict_list() -> list[MatcherPattern]:
         """Provide BluetoothMatcher definition."""
-        return [{
-            "local_name": "OBDII",
-            "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
-        }]
+        return [
+            {
+                "local_name": "OBDII*",
+                "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
+            },
+            {
+                "local_name": "OBD2*",
+                "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
+            },
+        ]
 
     @staticmethod
     def uuid_rx() -> str:
@@ -50,6 +56,30 @@ class OBD2_BLE(BaseOBD2):
     @staticmethod
     def uuid_tx() -> str:
         return "0000fff2-0000-1000-8000-00805f9b34fb"
+
+
+class LegacyFFE0OBD2_BLE(BaseOBD2):
+    @staticmethod
+    def matcher_dict_list() -> list[MatcherPattern]:
+        """Provide BluetoothMatcher definition for legacy FFE0/FFE1 BLE adapters."""
+        return [
+            {
+                "local_name": "OBDII*",
+                "service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"
+            },
+            {
+                "local_name": "OBD2*",
+                "service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"
+            },
+        ]
+
+    @staticmethod
+    def uuid_rx() -> str:
+        return "0000ffe1-0000-1000-8000-00805f9b34fb"
+
+    @staticmethod
+    def uuid_tx() -> str:
+        return "0000ffe1-0000-1000-8000-00805f9b34fb"
 
 
 class VlinkOBD2_BLE(OBD2_BLE):
@@ -118,6 +148,7 @@ class Kiwi3OBD2_BLE(BaseOBD2):
 
 AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [
     OBD2_BLE,
+    LegacyFFE0OBD2_BLE,
     VlinkOBD2_BLE,
     VeepeakOBD2_BLE,
     ViecarOBD2_BLE,

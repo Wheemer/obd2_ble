@@ -67,6 +67,7 @@ Supported BLE service UUIDs:
 Known device profiles:
 
 - Generic OBD-II BLE adapters using service `FFF0` and characteristics `FFF1`/`FFF2`
+- Legacy generic BLE adapters using service `FFE0` and characteristic `FFE1` for both notify/read and write
 - Vgate/V-LINK-style adapters using service `18F0` and characteristics `18F1`/`18F2`
 - Veepeak OBDCheck BLE/BLE+ adapters advertising as `VEEPEAK` using service `FFF0` and characteristics `FFF1`/`FFF2`
 - Viecar adapters advertising as `Viecar` using service `FFF0` and characteristics `FFF1`/`FFF2`
