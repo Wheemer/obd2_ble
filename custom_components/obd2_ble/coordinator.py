@@ -154,6 +154,14 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         _LOGGER.debug("Check if the device is still available")
         available = async_address_present(self.hass, self.config_entry.unique_id, connectable=True)
         if not available:
+            if self.api is not None and self.api.is_connected():
+                self.last_error = "Bluetooth device is connected but not currently advertising as connectable"
+                self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
+                _LOGGER.debug(
+                    "Device is connected but not advertising as connectable; keep visible-device polling: interval = %s",
+                    self.update_interval,
+                )
+                return self._cache_data if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES) else {}
             self.last_error = "Bluetooth device is not currently present"
             _LOGGER.debug("Car out of range? Switch to extra slow polling")
             self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
@@ -277,6 +285,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         return self._supported_pids, self._supported_cmds
     
     def ble_found(self) -> bool:
+        if self.ble_connected():
+            return True
         if not self.config_entry or not self.config_entry.unique_id:
             return False
         address = self.config_entry.unique_id
