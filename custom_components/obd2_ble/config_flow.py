@@ -102,7 +102,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> type[BaseOBD2] | None:
         """Check if device is supported by an available OBD2 BLE class."""
         for obd2_class in AVAILABLE_OBD2_CLASSES:
-            if all([advertisement_matches(matcher, discovery_info.advertisement, discovery_info.address) for matcher in obd2_class.matcher_dict_list()]):
+            if any(
+                advertisement_matches(matcher, discovery_info.advertisement, discovery_info.address)
+                for matcher in obd2_class.matcher_dict_list()
+            ):
                 _LOGGER.debug(
                     "Device %s (%s) detected as '%s'",
                     discovery_info.name,
