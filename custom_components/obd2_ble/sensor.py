@@ -20,10 +20,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import Obd2BleConfigEntry
 from .const import (
     CONF_COMMANDS,
+    CONF_COMMAND,
     CONF_ICON,
     CONF_UNIT,
     CONF_DEVICE_CLASS,
     CONF_STATE_CLASS,
+    DEFAULT_COMMAND_NAMES,
     ICON_KEYWORDS
 )
 from .coordinator import Obd2BleDataUpdateCoordinator
@@ -136,7 +138,10 @@ async def async_setup_entry(
 ):
     """Set up sensor platform."""
 
-    command_configs = entry.options.get(CONF_COMMANDS, [])
+    if CONF_COMMANDS in entry.options:
+        command_configs = entry.options[CONF_COMMANDS]
+    else:
+        command_configs = [{CONF_COMMAND: command} for command in DEFAULT_COMMAND_NAMES]
     _LOGGER.debug("Configured commands %s", command_configs)
 
     active_command_names: set[str] = set()
@@ -249,7 +254,7 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
             self._attr_available = False
         else:
             if data is None:
-                _LOGGER.warning(f"No data available for sensor {str(self._command)}")
+                _LOGGER.debug("No data available for sensor %s", str(self._command))
                 self._attr_available = False
             elif isinstance(data, Response):
                 self._attr_available = True

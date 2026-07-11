@@ -67,7 +67,9 @@ AUTO_PROTOCOL_CANDIDATES = (
 )
 EXPECTED_PROBE_LOGGERS = (
     "obdii.protocols.protocol_can",
+    "obdii.protocols.protocol_kwp",
     "obdii.protocols.protocol_base",
+    "obdii.protocols.mixins",
 )
 
 
@@ -386,21 +388,25 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if command is None:
                     _LOGGER.warning("Skipping invalid command: %s", command)
                     continue
-                if command in ECU_HEALTH_COMMANDS:
-                    if ecu_detected and command == ecu_command:
-                        new_data[str(command)] = ecu_response
+                if command == ecu_command and ecu_response is not None:
+                    new_data[str(command)] = ecu_response
+                    continue
+                if not ecu_detected:
                     continue
                 try:
                     _LOGGER.debug("Querying OBD2 for command %s", command)
-                    response: Response = await self.hass.async_add_executor_job(self.api.query, command)
+                    response: Response = await self.hass.async_add_executor_job(self._query_command, command)
                     _LOGGER.debug("Received response for command %s: %s", command, response)
                     if response is not None and response.value is not None:
                         new_data[str(command)] = response
                     else:
                         _LOGGER.warning("Received empty response for command %s", command)
+                except (ResponseError, TimeoutError) as err:
+                    self.last_error = f"Command {command} did not return data: {err}"
+                    _LOGGER.debug("Command %s did not return data: %s", command, err)
                 except Exception as err:
                     self.last_error = f"Error occurred while querying command {command}: {err}"
-                    _LOGGER.error(f"Error occurred while querying command {command}: {err}")
+                    _LOGGER.warning("Error occurred while querying command %s: %s", command, err)
             if not ecu_detected and len(new_data) == 0:
                 if self._configured_protocol() == Protocol.AUTO:
                     await self.hass.async_add_executor_job(self._close_api)
