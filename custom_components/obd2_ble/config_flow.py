@@ -140,6 +140,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            auto_configured = False
             self._discovery_info = self._discovered_devices[user_input[CONF_ADDRESS]]
             await self.async_set_unique_id(
                 self._discovery_info.address, raise_on_progress=False
@@ -151,6 +152,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.debug("Auto-configuring device %s using class %s", self._discovery_info.name, obdii_dev.__name__)
                     self._characteristic_uuid_read = obdii_dev.uuid_rx()
                     self._characteristic_uuid_write = obdii_dev.uuid_tx()
+                    auto_configured = True
                 else:
                     _LOGGER.warning("Device %s does not match any known OBD2 classes, auto-configuration may fail", self._discovery_info.name)
 
@@ -176,6 +178,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                     errors["base"] = "cannot_connect"
                 else:
+                    if auto_configured:
+                        await self._transport.async_close()
+                        return self._async_create_obd2_entry()
                     return await self.async_step_connection()
 
 
@@ -214,6 +219,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    def _async_create_obd2_entry(self) -> config_entries.ConfigFlowResult:
+        """Create a config entry with the selected BLE connection settings."""
+        assert self._discovery_info is not None, "Discovery info should have been set by now"
+        return self.async_create_entry(
+            title=self._discovery_info.name,
+            data={
+                CONF_ADDRESS: self._discovery_info.address,
+                CONF_CHARACTERISTIC_UUID_READ: self._characteristic_uuid_read,
+                CONF_CHARACTERISTIC_UUID_WRITE: self._characteristic_uuid_write,
+                CONF_PROTOCOL: self._protocol,
+            },
+        )
+
     async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
@@ -240,16 +258,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
-            assert self._discovery_info is not None, "Discovery info should have been set by now"
-            return self.async_create_entry(
-                title= self._discovery_info.name,
-                data={
-                    CONF_ADDRESS: self._discovery_info.address,
-                    CONF_CHARACTERISTIC_UUID_READ: self._characteristic_uuid_read,
-                    CONF_CHARACTERISTIC_UUID_WRITE: self._characteristic_uuid_write,
-                    CONF_PROTOCOL: self._protocol,
-                },
-            )
+            return self._async_create_obd2_entry()
 
         assert self._transport is not None and self._transport.is_connected(), "Transport should have been initialized and connected by now"
         characteristics: list[BleakGATTCharacteristic] = []
