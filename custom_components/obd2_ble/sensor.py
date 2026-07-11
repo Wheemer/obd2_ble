@@ -238,6 +238,11 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
     # async def async_update(self) -> None:
     def _handle_coordinator_update(self) -> None:
         try:
+            if self.coordinator.data is None:
+                _LOGGER.debug("No coordinator data available for sensor %s", str(self._command))
+                self._attr_available = False
+                super()._handle_coordinator_update()
+                return
             data: Response | None = self.coordinator.data.get(str(self._command))
             _LOGGER.debug("Updating sensor %s with data: %s", str(self._command), data)
         except Exception as ex:
