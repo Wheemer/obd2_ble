@@ -151,22 +151,35 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             _LOGGER.error("No config entry available for coordinator")
             return {}
 
-        _LOGGER.debug("Check if the device is still available")
-        available = async_address_present(self.hass, self.config_entry.unique_id, connectable=True)
-        if not available:
-            if self.api is not None and self.api.is_connected():
-                self.last_error = "Bluetooth device is connected but not currently advertising as connectable"
-                self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
-                _LOGGER.debug(
-                    "Device is connected but not advertising as connectable; keep visible-device polling: interval = %s",
-                    self.update_interval,
-                )
-                return self._cache_data if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES) else {}
+        address = self.config_entry.unique_id
+        connected = self.api is not None and self.api.is_connected()
+        present = connected or async_address_present(self.hass, address, connectable=False)
+        connectable = connected or async_address_present(self.hass, address, connectable=True)
+
+        _LOGGER.debug(
+            "Bluetooth state for %s: present=%s connectable=%s connected=%s",
+            address,
+            present,
+            connectable,
+            connected,
+        )
+        if not present:
             self.last_error = "Bluetooth device is not currently present"
             _LOGGER.debug("Car out of range? Switch to extra slow polling")
             self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
             _LOGGER.debug(
                 "Car out of range? Switch to ultra slow polling: interval = %s",
+                self.update_interval,
+            )
+            if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+                return self._cache_data
+            return {}
+
+        if not connectable:
+            self.last_error = "Bluetooth device is visible but not connectable yet"
+            self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
+            _LOGGER.debug(
+                "Device is visible but not connectable; retrying in %s",
                 self.update_interval,
             )
             if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
@@ -181,7 +194,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "OBD2 adapter is visible but the car is not responding; retrying in %s",
                     self.update_interval,
                 )
@@ -207,7 +220,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "OBD2 adapter is visible but the car is not responding; retrying in %s",
                     self.update_interval,
                 )
@@ -290,10 +303,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         if not self.config_entry or not self.config_entry.unique_id:
             return False
         address = self.config_entry.unique_id
-        ble_device: BLEDevice | None = bluetooth.async_ble_device_from_address(
-            self.hass, address, True
-        )
-        return ble_device is not None
+        return async_address_present(self.hass, address, connectable=False)
 
     def ble_connected(self) -> bool:
         return self.api.is_connected() if self.api else False
