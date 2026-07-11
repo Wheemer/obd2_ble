@@ -43,12 +43,12 @@ DEFAULT_CHARACTERISTIC_UUID_READ = "0000fff1-0000-1000-8000-00805f9b34fb"
 DEFAULT_CHARACTERISTIC_UUID_WRITE = "0000fff2-0000-1000-8000-00805f9b34fb"
 DEFAULT_CACHED_VALUES = False
 # when the device is in range, and the car is on, poll quickly
-DEFAULT_FAST_POLL = 10
+DEFAULT_FAST_POLL = 5
 # when the device is in range, but the car is off, we need to poll occasionally
-DEFAULT_SLOW_POLL = 5 * 60
+DEFAULT_SLOW_POLL = 30
 # when the device is out of range, use ultra slow polling since a bluetooth
 # advertisement message will kick it back into life when back in range.
-DEFAULT_XS_POLL = 1 * 60 * 60
+DEFAULT_XS_POLL = 60
 
 ICON_KEYWORDS: Final[dict[str, str]] = {
     # --- Speed & Rotations ---
