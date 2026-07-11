@@ -166,7 +166,24 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             return {}
         
         if self.api is None:
-            if not self._connect_ble():
+            try:
+                connected = self._connect_ble()
+            except Exception as err:
+                self.last_error = f"Error connecting with OBD2: {err}"
+                self.update_interval = timedelta(
+                    seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
+                )
+                _LOGGER.warning(
+                    "OBD2 adapter is visible but the car is not responding; retrying in %s",
+                    self.update_interval,
+                )
+                if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+                    return self._cache_data
+                return {}
+            if not connected:
+                self.update_interval = timedelta(
+                    seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
+                )
                 return {}
 
         assert self.api is not None, "API should be initialized at this point"
@@ -179,7 +196,16 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     raise UpdateFailed("No connection to OBD2 after connect attempt")
             except Exception as err:
                 self.last_error = f"Error connecting with OBD2: {err}"
-                raise UpdateFailed(f"Error connecting with OBD2: {err}")
+                self.update_interval = timedelta(
+                    seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
+                )
+                _LOGGER.warning(
+                    "OBD2 adapter is visible but the car is not responding; retrying in %s",
+                    self.update_interval,
+                )
+                if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+                    return self._cache_data
+                return {}
 
         _LOGGER.debug("Device is connected, proceed to query data")
         try:
