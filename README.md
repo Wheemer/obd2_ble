@@ -67,6 +67,13 @@ Known device profiles:
 - Vgate/V-LINK-style adapters using service `18F0` and characteristics `18F1`/`18F2`
 - Veepeak OBDCheck BLE/BLE+ adapters advertising as `VEEPEAK` using service `FFF0` and characteristics `FFF1`/`FFF2`
 
+Veepeak BLE/BLE+ note:
+
+- Service UUID: `0000fff0-0000-1000-8000-00805f9b34fb`
+- Input/read/notify characteristic: `0000fff1-0000-1000-8000-00805f9b34fb`
+- Output/write characteristic: `0000fff2-0000-1000-8000-00805f9b34fb`
+- This mapping matches the Car Scanner ELM OBD2 Android app's Veepeak BLE profile. Some Veepeak adapters expose duplicate UUIDs, so the integration selects the characteristic object whose BLE properties match the needed direction instead of using only the UUID string.
+
 ## Enhanced PIDs
 
 The integration includes opt-in enhanced commands that may not appear in the

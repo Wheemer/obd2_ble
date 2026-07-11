@@ -81,17 +81,39 @@ class TransportBLE(TransportBase):
         if not matches:
             raise ValueError(f"Characteristic {uuid} was not found.")
 
+        _LOGGER.debug(
+            "Found %s BLE characteristic candidate(s) for %s: %s",
+            len(matches),
+            uuid,
+            ", ".join(self._format_characteristic(characteristic) for characteristic in matches),
+        )
         for characteristic in matches:
             if preferred_properties.intersection(characteristic.properties):
+                _LOGGER.debug(
+                    "Selected BLE characteristic %s for preferred properties %s",
+                    self._format_characteristic(characteristic),
+                    sorted(preferred_properties),
+                )
                 return characteristic
 
         if len(matches) == 1:
+            _LOGGER.debug(
+                "Selected only BLE characteristic %s despite missing preferred properties %s",
+                self._format_characteristic(matches[0]),
+                sorted(preferred_properties),
+            )
             return matches[0]
 
         raise ValueError(
             f"Multiple characteristics found for {uuid}, but none have "
             f"any of the required properties: {sorted(preferred_properties)}"
         )
+
+    @staticmethod
+    def _format_characteristic(characteristic: BleakGATTCharacteristic) -> str:
+        handle = getattr(characteristic, "handle", "unknown")
+        properties = ",".join(characteristic.properties) or "none"
+        return f"{characteristic.uuid} handle={handle} properties={properties}"
 
     async def async_connect(self) -> None:
         _LOGGER.debug("Attempting to connect to BLE device %s (%s)", self._ble_device.name, self._ble_device.address)
