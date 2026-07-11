@@ -469,7 +469,19 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         return async_address_present(self.hass, address, connectable=False)
 
     def ble_connected(self) -> bool:
-        return self.api.is_connected() if self.api else False
+        if self.api and self.api.is_connected():
+            return True
+        if not self.config_entry or not self.config_entry.unique_id:
+            return False
+
+        # The coordinator may close idle GATT sessions while cycling ECU probes.
+        # Report whether HA can connect to the adapter, not whether we are
+        # holding a GATT connection open at this exact instant.
+        return async_address_present(
+            self.hass,
+            self.config_entry.unique_id,
+            connectable=True,
+        )
 
     def car_connected(self) -> bool:
         return self._last_fetch_successful and self.ble_connected()
