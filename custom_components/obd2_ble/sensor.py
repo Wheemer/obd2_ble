@@ -24,6 +24,7 @@ from .const import (
     CONF_UNIT,
     CONF_DEVICE_CLASS,
     CONF_STATE_CLASS,
+    DEFAULT_COMMANDS,
     ICON_KEYWORDS
 )
 from .coordinator import Obd2BleDataUpdateCoordinator
@@ -136,11 +137,12 @@ async def async_setup_entry(
 ):
     """Set up sensor platform."""
 
-    _LOGGER.debug("Configured commands %s", entry.options.get(CONF_COMMANDS))
+    command_configs = entry.options.get(CONF_COMMANDS, DEFAULT_COMMANDS)
+    _LOGGER.debug("Configured commands %s", command_configs)
 
     active_command_names: set[str] = set()
     sensor_commands: list[Obd2BleSensorEntityConfig] = []
-    for command_config in entry.options.get(CONF_COMMANDS, []):
+    for command_config in command_configs:
         try:
             command = get_command(command_config.get("command"))
         except KeyError:
