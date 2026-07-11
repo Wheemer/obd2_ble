@@ -45,10 +45,10 @@ DEFAULT_CACHED_VALUES = False
 # when the device is in range, and the car is on, poll quickly
 DEFAULT_FAST_POLL = 5
 # when the device is in range, but the car is off, we need to poll occasionally
-DEFAULT_SLOW_POLL = 30
+DEFAULT_SLOW_POLL = 5
 # when the device is out of range, use ultra slow polling since a bluetooth
 # advertisement message will kick it back into life when back in range.
-DEFAULT_XS_POLL = 60
+DEFAULT_XS_POLL = 1 * 60 * 60
 
 ICON_KEYWORDS: Final[dict[str, str]] = {
     # --- Speed & Rotations ---
