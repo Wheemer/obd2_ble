@@ -1,13 +1,15 @@
 """Coordinator for OBD2 BLE."""
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 import logging
-from typing import Any
+from typing import Any, Iterator
 
 from bleak.backends.device import BLEDevice
 
 from obdii import Command, Connection, Protocol, Response, at_commands, commands as veh_commands, __version__ as obdii_version
 from obdii.basetypes import MISSING
+from obdii.errors import CanError, MissingDataError, ProtocolConnectionError, ResponseError
 
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth.api import async_address_present
@@ -42,7 +44,45 @@ except ImportError:
     FAKE_COMMANDS: list[Command] = []
 
 _LOGGER = logging.getLogger(__name__)
-ECU_HEALTH_COMMAND = veh_commands["ENGINE_SPEED"]
+logging.getLogger("obdii.connection").setLevel(logging.WARNING)
+ECU_HEALTH_COMMANDS = tuple(
+    command
+    for command in (
+        veh_commands[1][0x00],  # supported PIDs 01-20
+        veh_commands["ENGINE_SPEED"],
+        veh_commands[1][0x1F],  # run time since engine start
+        veh_commands[1][0x42],  # vehicle/control module voltage
+    )
+    if command is not None
+)
+AUTO_PROTOCOL_CANDIDATES = (
+    Protocol.AUTO,
+    Protocol.ISO_15765_4_CAN,
+    Protocol.ISO_15765_4_CAN_B,
+    Protocol.ISO_15765_4_CAN_C,
+    Protocol.ISO_15765_4_CAN_D,
+    Protocol.ISO_9141_2,
+    Protocol.ISO_14230_4_KWP_FAST,
+    Protocol.ISO_14230_4_KWP,
+)
+EXPECTED_PROBE_LOGGERS = (
+    "obdii.protocols.protocol_can",
+    "obdii.protocols.protocol_base",
+)
+
+
+@contextmanager
+def _suppress_expected_probe_logs() -> Iterator[None]:
+    """Mute noisy protocol-level logs for expected car-off probe failures."""
+    loggers = [logging.getLogger(name) for name in EXPECTED_PROBE_LOGGERS]
+    previous_levels = [logger.level for logger in loggers]
+    try:
+        for logger in loggers:
+            logger.setLevel(logging.CRITICAL + 1)
+        yield
+    finally:
+        for logger, level in zip(loggers, previous_levels, strict=True):
+            logger.setLevel(level)
 
 type Obd2BleConfigEntry = ConfigEntry[Obd2BleDataUpdateCoordinator]
 
@@ -73,6 +113,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self.transport: TransportBLE | None = None
         self.api: Connection | None = None
         self.active_commands: set[Command] = set()
+        self._protocol_candidate_index = 0
+        self._last_requested_protocol: Protocol | None = None
+        self._last_active_protocol: Protocol | None = None
 
         if not entry or not entry.unique_id:
             raise ConditionError("No unique_id found in config entry")
@@ -87,7 +130,49 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         # self._connect_ble()
 
-    def _connect_ble(self, ble_device: BLEDevice) -> bool:
+    def _configured_protocol(self) -> Protocol:
+        """Return the user-configured protocol."""
+        return Protocol(self.config_entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value))
+
+    def _protocol_candidates(self) -> tuple[Protocol, ...]:
+        """Return protocol candidates for the current config entry."""
+        configured = self._configured_protocol()
+        if configured != Protocol.AUTO:
+            return (configured,)
+        return AUTO_PROTOCOL_CANDIDATES
+
+    def _current_protocol_candidate(self) -> Protocol:
+        """Return the protocol candidate to try on the next connection."""
+        candidates = self._protocol_candidates()
+        return candidates[self._protocol_candidate_index % len(candidates)]
+
+    def _advance_protocol_candidate(self) -> None:
+        """Advance to the next protocol candidate when AUTO probing fails."""
+        candidates = self._protocol_candidates()
+        if len(candidates) <= 1:
+            return
+        self._protocol_candidate_index = (self._protocol_candidate_index + 1) % len(candidates)
+        _LOGGER.debug(
+            "Advancing OBD2 AUTO protocol probe to %s",
+            candidates[self._protocol_candidate_index].name,
+        )
+
+    def _reset_protocol_candidate(self) -> None:
+        """Keep using the current protocol after a successful ECU response."""
+        candidates = self._protocol_candidates()
+        if self._last_requested_protocol in candidates:
+            self._protocol_candidate_index = candidates.index(self._last_requested_protocol)
+
+    def _close_api(self) -> None:
+        """Close and clear the active OBD connection."""
+        if self.api is not None:
+            try:
+                self.api.close()
+            finally:
+                self.api = None
+                self.transport = None
+
+    def _connect_ble(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
         """Connect to the BLE device."""
 
         if not self.config_entry or not self.config_entry.unique_id:
@@ -107,19 +192,48 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self.api = Connection(
             transport=self.transport,
             auto_connect=False,
-            protocol=Protocol(entry_data.get(CONF_PROTOCOL, Protocol.AUTO.value)),
-            log_handler=MISSING,
+            protocol=protocol,
+            log_handler=None,
             log_formatter=MISSING,
             log_level=MISSING,
         )
 
+        self._last_requested_protocol = protocol
         self.api.connect()
+        self._last_active_protocol = self.api.protocol
         hw_version = self.api.query(at_commands.VERSION_ID)
         if hw_version is not None:
             entry_data[CONF_HW_VERSION] = hw_version.value if hw_version else None
             self.device_info["hw_version"] = hw_version.value if hw_version else None
 
         return True
+
+    def _query_command(self, command: Command) -> Response:
+        """Query a command while muting noisy expected protocol failures."""
+        if self.api is None:
+            raise ConnectionError("No OBD2 API connection")
+        with _suppress_expected_probe_logs():
+            return self.api.query(command)
+
+    def _query_ecu_health(self) -> tuple[Command | None, Response | None]:
+        """Probe for a live ECU using a few standard commands."""
+        last_err: Exception | None = None
+        for command in ECU_HEALTH_COMMANDS:
+            try:
+                response = self._query_command(command)
+            except (CanError, MissingDataError, ProtocolConnectionError, TimeoutError) as err:
+                last_err = err
+                _LOGGER.debug("ECU health probe %s did not get data: %s", command, err)
+                continue
+            except ResponseError as err:
+                last_err = err
+                _LOGGER.debug("ECU health probe %s returned protocol error: %s", command, err)
+                continue
+            if response is not None and response.value is not None:
+                return command, response
+        if last_err is not None:
+            raise last_err
+        return None, None
 
     async def async_shutdown(self) -> None:
         """Shutdown coordinator and any connection."""
@@ -189,12 +303,16 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                     return self._cache_data
                 return {}
+            protocol = self._current_protocol_candidate()
             try:
+                _LOGGER.debug("Connecting to OBD2 adapter using protocol candidate %s", protocol.name)
                 connected = await self.hass.async_add_executor_job(
-                    self._connect_ble, ble_device
+                    self._connect_ble, ble_device, protocol
                 )
             except Exception as err:
                 self.last_error = f"Error connecting with OBD2: {err!r}"
+                await self.hass.async_add_executor_job(self._close_api)
+                self._advance_protocol_candidate()
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
@@ -222,6 +340,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     raise UpdateFailed("No connection to OBD2 after connect attempt")
             except Exception as err:
                 self.last_error = f"Error connecting with OBD2: {err!r}"
+                if self._configured_protocol() == Protocol.AUTO:
+                    await self.hass.async_add_executor_job(self._close_api)
+                    self._advance_protocol_candidate()
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
@@ -238,24 +359,35 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         try:
             self._last_fetch_successful = False
             new_data: dict[str, Response] = {}
+            ecu_command: Command | None = None
             ecu_response: Response | None = None
             try:
-                _LOGGER.debug("Querying OBD2 health probe %s", ECU_HEALTH_COMMAND)
-                ecu_response = await self.hass.async_add_executor_job(
-                    self.api.query, ECU_HEALTH_COMMAND
+                _LOGGER.debug(
+                    "Querying OBD2 health probes over requested=%s active=%s",
+                    self._last_requested_protocol.name if self._last_requested_protocol else None,
+                    self.api.protocol.name if self.api else None,
                 )
-                _LOGGER.debug("Received health probe response: %s", ecu_response)
+                ecu_command, ecu_response = await self.hass.async_add_executor_job(
+                    self._query_ecu_health
+                )
+                _LOGGER.debug(
+                    "Received health probe response for %s: %s",
+                    ecu_command,
+                    ecu_response,
+                )
             except Exception as err:
                 self.last_error = f"Error occurred while querying ECU health probe: {err}"
                 _LOGGER.debug("ECU health probe failed: %s", err)
 
             ecu_detected = ecu_response is not None and ecu_response.value is not None
+            if ecu_detected:
+                self._reset_protocol_candidate()
             for command in self.active_commands:
                 if command is None:
                     _LOGGER.warning("Skipping invalid command: %s", command)
                     continue
-                if command == ECU_HEALTH_COMMAND:
-                    if ecu_detected:
+                if command in ECU_HEALTH_COMMANDS:
+                    if ecu_detected and command == ecu_command:
                         new_data[str(command)] = ecu_response
                     continue
                 try:
@@ -270,9 +402,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     self.last_error = f"Error occurred while querying command {command}: {err}"
                     _LOGGER.error(f"Error occurred while querying command {command}: {err}")
             if not ecu_detected and len(new_data) == 0:
+                if self._configured_protocol() == Protocol.AUTO:
+                    await self.hass.async_add_executor_job(self._close_api)
+                    self._advance_protocol_candidate()
                 self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
                 _LOGGER.debug(
-                    "Car is probably off, switch to slow polling: interval = %s",
+                    "ECU did not respond; retrying in %s",
                     self.update_interval,
                 )
             else:
