@@ -25,8 +25,8 @@
         "title": "Configure Connection",
         "description": "Set up the Bluetooth connection parameters for your OBD-II device.",
         "data": {
-          "characteristic_read_uuid": "Read (RX) Characteristic",
-          "characteristic_write_uuid": "Write (TX) Characteristic",
+          "characteristic_uuid_read": "Read (RX) Characteristic",
+          "characteristic_uuid_write": "Write (TX) Characteristic",
           "protocol": "OBD2 Bus Architecture Standard"
         }
       },

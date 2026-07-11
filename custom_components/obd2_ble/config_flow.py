@@ -63,6 +63,16 @@ from .sensor import get_list_of_units, propose_icon_from_command, propose_sensor
 _LOGGER = logging.getLogger(__name__)
 
 
+def _characteristic_label(characteristic: BleakGATTCharacteristic) -> str:
+    """Return a stable label for a BLE characteristic option."""
+    handle = getattr(characteristic, "handle", "unknown")
+    properties = ", ".join(characteristic.properties) or "no properties"
+    return (
+        f"{characteristic.description} {characteristic.uuid.split('-')[0]} "
+        f"(handle {handle}; {properties})"
+    )
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow handler."""
 
@@ -254,7 +264,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             options=[
                                 {
                                     "value": characteristic.uuid,
-                                    "label": f"{characteristic.description} {characteristic.uuid.split('-')[0]}"
+                                    "label": _characteristic_label(characteristic)
                                 } for characteristic in characteristics],
                             mode=selector.SelectSelectorMode.DROPDOWN,
                             translation_key="ble_read_characteristics",
@@ -265,7 +275,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             options=[
                                 {
                                     "value": characteristic.uuid,
-                                    "label": f"{characteristic.description} {characteristic.uuid.split('-')[0]}"
+                                    "label": _characteristic_label(characteristic)
                                 } for characteristic in characteristics],
                             mode=selector.SelectSelectorMode.DROPDOWN,
                             translation_key="ble_write_characteristics",
