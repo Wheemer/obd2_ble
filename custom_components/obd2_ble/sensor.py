@@ -107,6 +107,7 @@ class Obd2BleSensorEntityConfig:
             name=name or command_label(command),
             icon=icon,
             native_unit_of_measurement=unit,
+            suggested_display_precision=2,
             **kwargs,
         )
 

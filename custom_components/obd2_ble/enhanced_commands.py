@@ -36,6 +36,18 @@ ENHANCED_COMMAND_LABELS: dict[str, str] = {
     HONDA_ATF_TEMP_9023.name: "Honda ATF temperature candidate 9023",
 }
 
+COMMAND_LABELS: dict[str, str] = {
+    "ENGINE_SPEED": "Engine RPM",
+    "VEHICLE_SPEED": "Speed",
+    "ENGINE_LOAD": "Engine Load",
+    "THROTTLE_POSITION": "Throttle",
+    "INTAKE_AIR_TEMP": "Intake Temp",
+    "FUEL_LEVEL": "Fuel Level",
+    "VEHICLE_VOLTAGE": "Battery Voltage",
+    "ENGINE_RUN_TIME": "Run Time",
+    **ENHANCED_COMMAND_LABELS,
+}
+
 
 def get_command(name: str) -> Command:
     """Return a built-in or enhanced OBD command by name."""
@@ -52,7 +64,7 @@ def available_enhanced_commands() -> list[Command]:
 
 def command_label(command: Command) -> str:
     """Return a user-facing label for a command."""
-    return ENHANCED_COMMAND_LABELS.get(
+    return COMMAND_LABELS.get(
         command.name,
         " ".join(command.name.replace("_", " ").split()).capitalize(),
     )
