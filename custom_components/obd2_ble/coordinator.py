@@ -13,6 +13,7 @@ from obdii.errors import CanError, MissingDataError, ProtocolConnectionError, Re
 
 from homeassistant.components import bluetooth
 from homeassistant.components.bluetooth.api import async_address_present
+from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -38,6 +39,7 @@ from .const import (
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
 )
 from .obdii.transport_ble import TransportBLE
+from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, advertisement_matches
 try:
     from .debug import FAKE_COMMANDS
 except ImportError:
@@ -73,6 +75,11 @@ EXPECTED_PROBE_LOGGERS = (
 )
 DEFAULT_FUNCTIONAL_CAN_HEADER = "7DF"
 MISSING_ADAPTER_FAST_RETRIES = 12
+OBD_SERIAL_SERVICE_UUIDS = {
+    "0000fff0-0000-1000-8000-00805f9b34fb",
+    "0000ffe0-0000-1000-8000-00805f9b34fb",
+}
+OBD_SERIAL_NAMES = {"sps"}
 
 
 @contextmanager
@@ -122,6 +129,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._last_active_protocol: Protocol | None = None
         self._active_obd_header: str | None = None
         self._missing_adapter_retries = 0
+        self._resolved_address: str = entry.unique_id
 
         if not entry or not entry.unique_id:
             raise ConditionError("No unique_id found in config entry")
@@ -198,6 +206,53 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     def _reset_missing_adapter_retries(self) -> None:
         """Reset missing-adapter backoff once HA can see the adapter again."""
         self._missing_adapter_retries = 0
+
+    def _service_info_matches_obd2(self, service_info: BluetoothServiceInfoBleak) -> bool:
+        """Return whether a discovered advertisement looks like an OBD2 adapter."""
+        if any(
+            advertisement_matches(matcher, service_info.advertisement, service_info.address)
+            for obd2_class in AVAILABLE_OBD2_CLASSES
+            for matcher in obd2_class.matcher_dict_list()
+        ):
+            return True
+
+        local_name = (service_info.name or service_info.advertisement.local_name or "").lower()
+        service_uuids = {uuid.lower() for uuid in service_info.advertisement.service_uuids}
+        return local_name in OBD_SERIAL_NAMES and bool(service_uuids & OBD_SERIAL_SERVICE_UUIDS)
+
+    def _resolve_ble_address(self, configured_address: str) -> str:
+        """Return the configured address or a single discovered OBD-like fallback."""
+        if async_address_present(self.hass, configured_address, connectable=False):
+            self._resolved_address = configured_address
+            return configured_address
+
+        candidates = [
+            service_info
+            for service_info in bluetooth.async_discovered_service_info(self.hass)
+            if service_info.address != configured_address
+            and self._service_info_matches_obd2(service_info)
+        ]
+        deduped = {service_info.address: service_info for service_info in candidates}
+        if len(deduped) != 1:
+            if deduped:
+                _LOGGER.debug(
+                    "Configured OBD2 adapter %s missing; refusing ambiguous fallback candidates: %s",
+                    configured_address,
+                    sorted(deduped),
+                )
+            self._resolved_address = configured_address
+            return configured_address
+
+        fallback = next(iter(deduped.values()))
+        if fallback.address != self._resolved_address:
+            _LOGGER.warning(
+                "Configured OBD2 adapter %s is missing; using discovered OBD-like adapter %s (%s)",
+                configured_address,
+                fallback.address,
+                fallback.name or fallback.advertisement.local_name,
+            )
+        self._resolved_address = fallback.address
+        return fallback.address
 
     def _connect_ble(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
         """Connect to the BLE device."""
@@ -323,7 +378,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             _LOGGER.error("No config entry available for coordinator")
             return {}
 
-        address = self.config_entry.unique_id
+        configured_address = self.config_entry.unique_id
+        address = self._resolve_ble_address(configured_address)
         connected = self.api is not None and self.api.is_connected()
         present = connected or async_address_present(self.hass, address, connectable=False)
         connectable = connected or async_address_present(self.hass, address, connectable=True)
@@ -543,6 +599,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         if not self.config_entry or not self.config_entry.unique_id:
             return False
         address = self.config_entry.unique_id
+        address = self._resolve_ble_address(address)
         return async_address_present(self.hass, address, connectable=False)
 
     def ble_connected(self) -> bool:
@@ -554,9 +611,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         # The coordinator may close idle GATT sessions while cycling ECU probes.
         # Report whether HA can connect to the adapter, not whether we are
         # holding a GATT connection open at this exact instant.
+        address = self._resolve_ble_address(self.config_entry.unique_id)
         return async_address_present(
             self.hass,
-            self.config_entry.unique_id,
+            address,
             connectable=True,
         )
 
