@@ -17,7 +17,7 @@ from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import ConditionError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -707,6 +707,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
     def request_refresh_from_bluetooth(self) -> None:
         """Request a refresh from a Bluetooth rediscovery callback with debounce."""
+        if self.hass.state is not CoreState.running:
+            _LOGGER.debug("Skipping OBD2 BLE rediscovery refresh during HA startup")
+            return
         now = self.hass.loop.time()
         if now - self._last_bluetooth_refresh_request < 2:
             return
