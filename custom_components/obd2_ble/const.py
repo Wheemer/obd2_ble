@@ -60,9 +60,9 @@ DEFAULT_CACHED_VALUES = False
 DEFAULT_FAST_POLL = 1
 # when the device is in range, but the car is off, we need to poll occasionally
 DEFAULT_SLOW_POLL = 5
-# when the device is out of range, use ultra slow polling since a bluetooth
-# advertisement message will kick it back into life when back in range.
-DEFAULT_XS_POLL = 1 * 60 * 60
+# when the device disappears from HA Bluetooth, keep probing often enough to
+# recover from flaky/quiet adapters even if a rediscovery callback is missed.
+DEFAULT_XS_POLL = 30
 
 ICON_KEYWORDS: Final[dict[str, str]] = {
     # --- Speed & Rotations ---
