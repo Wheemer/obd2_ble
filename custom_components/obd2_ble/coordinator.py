@@ -236,19 +236,19 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             return
 
         if len(normalized) == 3:
-            command = at_commands.SET_HEADER_11.format(
+            command = at_commands.SET_HEADER_11(
                 x=normalized[0],
                 y=normalized[1],
                 z=normalized[2],
             )
         elif len(normalized) == 6:
-            command = at_commands.SET_HEADER.format(
+            command = at_commands.SET_HEADER(
                 xx=normalized[0:2],
                 yy=normalized[2:4],
                 zz=normalized[4:6],
             )
         elif len(normalized) == 8:
-            command = at_commands.SET_HEADER_29.format(
+            command = at_commands.SET_HEADER_29(
                 ww=normalized[0:2],
                 xx=normalized[2:4],
                 yy=normalized[4:6],
