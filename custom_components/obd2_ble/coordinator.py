@@ -72,6 +72,7 @@ EXPECTED_PROBE_LOGGERS = (
     "obdii.protocols.mixins",
 )
 DEFAULT_FUNCTIONAL_CAN_HEADER = "7DF"
+MISSING_ADAPTER_FAST_RETRIES = 12
 
 
 @contextmanager
@@ -120,6 +121,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._last_requested_protocol: Protocol | None = None
         self._last_active_protocol: Protocol | None = None
         self._active_obd_header: str | None = None
+        self._missing_adapter_retries = 0
 
         if not entry or not entry.unique_id:
             raise ConditionError("No unique_id found in config entry")
@@ -176,6 +178,26 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self.api = None
                 self.transport = None
                 self._active_obd_header = None
+
+    def _mark_car_disconnected(self, error: str) -> None:
+        """Clear live-car state after an adapter or ECU disconnect."""
+        self._last_fetch_successful = False
+        self.last_error = error
+
+    def _missing_adapter_interval(self) -> timedelta:
+        """Return retry interval for a missing adapter before long backoff."""
+        self._missing_adapter_retries += 1
+        if self._missing_adapter_retries <= MISSING_ADAPTER_FAST_RETRIES:
+            return timedelta(
+                seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
+            )
+        return timedelta(
+            seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL)
+        )
+
+    def _reset_missing_adapter_retries(self) -> None:
+        """Reset missing-adapter backoff once HA can see the adapter again."""
+        self._missing_adapter_retries = 0
 
     def _connect_ble(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
         """Connect to the BLE device."""
@@ -314,19 +336,24 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             connected,
         )
         if not present:
-            self.last_error = "Bluetooth device is not currently present"
-            _LOGGER.debug("Car out of range? Switch to extra slow polling")
-            self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_XS_POLL, DEFAULT_XS_POLL))
+            self._mark_car_disconnected("Bluetooth device is not currently present")
+            await self.hass.async_add_executor_job(self._close_api)
+            self.update_interval = self._missing_adapter_interval()
             _LOGGER.debug(
-                "Car out of range? Switch to ultra slow polling: interval = %s",
+                "Bluetooth adapter is missing; retry %s/%s in %s",
+                self._missing_adapter_retries,
+                MISSING_ADAPTER_FAST_RETRIES,
                 self.update_interval,
             )
             if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                 return self._cache_data
             return {}
 
+        self._reset_missing_adapter_retries()
+
         if not connectable:
-            self.last_error = "Bluetooth device is visible but not connectable yet"
+            self._mark_car_disconnected("Bluetooth device is visible but not connectable yet")
+            await self.hass.async_add_executor_job(self._close_api)
             self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
             _LOGGER.debug(
                 "Device is visible but not connectable; retrying in %s",
@@ -341,7 +368,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self.hass, address, True
             )
             if ble_device is None:
-                self.last_error = f"Failed to discover device {address} via Bluetooth"
+                self._mark_car_disconnected(f"Failed to discover device {address} via Bluetooth")
+                await self.hass.async_add_executor_job(self._close_api)
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
@@ -356,7 +384,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     self._connect_ble, ble_device, protocol
                 )
             except Exception as err:
-                self.last_error = f"Error connecting with OBD2: {err!r}"
+                self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
                 await self.hass.async_add_executor_job(self._close_api)
                 self._advance_protocol_candidate()
                 self.update_interval = timedelta(
@@ -371,6 +399,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     return self._cache_data
                 return {}
             if not connected:
+                self._mark_car_disconnected("OBD2 adapter did not connect")
+                await self.hass.async_add_executor_job(self._close_api)
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
                 )
@@ -385,9 +415,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if not self.api.is_connected():
                     raise UpdateFailed("No connection to OBD2 after connect attempt")
             except Exception as err:
-                self.last_error = f"Error connecting with OBD2: {err!r}"
+                self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
+                await self.hass.async_add_executor_job(self._close_api)
                 if self._configured_protocol() == Protocol.AUTO:
-                    await self.hass.async_add_executor_job(self._close_api)
                     self._advance_protocol_candidate()
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL)
@@ -452,8 +482,11 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     self.last_error = f"Error occurred while querying command {command}: {err}"
                     _LOGGER.warning("Error occurred while querying command %s: %s", command, err)
             if not ecu_detected and len(new_data) == 0:
+                self._mark_car_disconnected(
+                    self.last_error or "ECU did not respond to OBD2 health probes"
+                )
+                await self.hass.async_add_executor_job(self._close_api)
                 if self._configured_protocol() == Protocol.AUTO:
-                    await self.hass.async_add_executor_job(self._close_api)
                     self._advance_protocol_candidate()
                 self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
                 _LOGGER.debug(
