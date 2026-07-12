@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Callable, Iterable
+from numbers import Real
 from typing import Any
 
 from obdii import Command, Response
@@ -34,9 +35,22 @@ from .entity import ObdBleEntity
 
 _LOGGER = logging.getLogger(__name__)
 
+COMMAND_ICONS: dict[str, str] = {
+    "ENGINE_SPEED": "mdi:engine",
+    "VEHICLE_SPEED": "mdi:speedometer",
+    "ENGINE_LOAD": "mdi:gauge",
+    "THROTTLE_POSITION": "mdi:accelerator",
+    "INTAKE_AIR_TEMP": "mdi:thermometer",
+    "FUEL_LEVEL": "mdi:gas-station",
+    "VEHICLE_VOLTAGE": "mdi:car-battery",
+    "ENGINE_RUN_TIME": "mdi:timer-outline",
+}
+
 
 def propose_icon_from_command(command: Command) -> str:
     """Propose an mdi icon string by checking token suffixes backwards."""
+    if command.name in COMMAND_ICONS:
+        return COMMAND_ICONS[command.name]
     tokens = command.name.lower().split("_")
     # Iterate backwards so the modifier (like 'speed' or 'temp') wins over 'engine'
     for token in tokens[::-1]:
@@ -58,7 +72,7 @@ def propose_sensor_state_class(command: Command) -> SensorStateClass | None:
 
     if primary_unit is None or primary_unit in ("string", "bool"):
         return None
-    elif last_token in ("count", "distance", "time", "odometer"):
+    elif last_token in ("count", "distance", "odometer"):
         return SensorStateClass.TOTAL_INCREASING
     return SensorStateClass.MEASUREMENT
 
@@ -72,6 +86,28 @@ def get_list_of_units(command: Command) -> list[str]:
         return []
 
 
+def _primary_unit(command: Command) -> str | None:
+    units = get_list_of_units(command)
+    return units[0] if units else None
+
+
+def _suggested_display_precision(command: Command) -> int | None:
+    unit = _primary_unit(command)
+    if unit in ("%", "°C", "V", "v"):
+        return 2
+    if unit in ("rpm", "km/h", "mph", "s", "seconds"):
+        return 0
+    return 2
+
+
+def _rounded_native_value(value: Any, precision: int | None) -> Any:
+    if precision is None or isinstance(value, bool):
+        return value
+    if isinstance(value, Real):
+        return round(value, precision)
+    return value
+
+
 def propose_sensor_device_class(command: Command) -> SensorDeviceClass | None:
     """Analyze OBD2 metrics using normalized unit collections."""
 
@@ -82,6 +118,8 @@ def propose_sensor_device_class(command: Command) -> SensorDeviceClass | None:
     primary_unit = raw_units[0] if raw_units else None
     tokens = command.name.lower().split("_")
 
+    if primary_unit == "rpm":
+        return None
     if primary_unit == "°C":
         return SensorDeviceClass.TEMPERATURE
     elif primary_unit in ("kPa", "bar", "psi"):
@@ -94,7 +132,7 @@ def propose_sensor_device_class(command: Command) -> SensorDeviceClass | None:
         return SensorDeviceClass.DURATION
     elif "temp" in tokens or "temperature" in tokens:
         return SensorDeviceClass.TEMPERATURE
-    elif "speed" in tokens or "velocity" in tokens or "rpm" in tokens:
+    elif "speed" in tokens or "velocity" in tokens:
         return SensorDeviceClass.SPEED
     return None
 
@@ -102,12 +140,18 @@ def propose_sensor_device_class(command: Command) -> SensorDeviceClass | None:
 class Obd2BleSensorEntityConfig:
     def __init__(self, command: Command, name: str|None=None, icon: str|None=None, unit: str|None=None, **kwargs) -> None:
         self.command = command
+        suggested_display_precision = kwargs.pop(
+            "suggested_display_precision",
+            _suggested_display_precision(command),
+        )
         self.description = SensorEntityDescription(
             key=command.name,
             name=name or command_label(command),
-            icon=icon,
-            native_unit_of_measurement=unit,
-            suggested_display_precision=2,
+            icon=icon or propose_icon_from_command(command),
+            native_unit_of_measurement=unit or _primary_unit(command),
+            suggested_display_precision=suggested_display_precision,
+            device_class=kwargs.pop("device_class", None) or propose_sensor_device_class(command),
+            state_class=kwargs.pop("state_class", None) or propose_sensor_state_class(command),
             **kwargs,
         )
 
@@ -259,7 +303,10 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
                 self._attr_available = False
             elif isinstance(data, Response):
                 self._attr_available = True
-                self._attr_native_value = data.value
+                self._attr_native_value = _rounded_native_value(
+                    data.value,
+                    self.entity_description.suggested_display_precision,
+                )
 
         super()._handle_coordinator_update()
 
