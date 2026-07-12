@@ -16,6 +16,7 @@ from obdii.basetypes import MISSING
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 BLE_WRITE_CHUNK_SIZE = 17
+BLE_CONNECT_ATTEMPTS = 1
 
 class TransportBLE(TransportBase):
     def __init__(
@@ -23,7 +24,7 @@ class TransportBLE(TransportBase):
         ble_device: BLEDevice = MISSING,
         uuid_write: str = MISSING,
         uuid_read: str = MISSING,
-        timeout: float = 10.0,
+        timeout: float = 4.0,
         loop: Optional[asyncio.AbstractEventLoop] = None,
         **kwargs,
     ) -> None:
@@ -122,7 +123,7 @@ class TransportBLE(TransportBase):
             BleakClientWithServiceCache,
             self._ble_device,
             self._ble_device.name or "Unknown Device",
-            max_attempts=3
+            max_attempts=BLE_CONNECT_ATTEMPTS,
         )
         self._read_char = self._resolve_characteristic(
             self.config["uuid_read"],
