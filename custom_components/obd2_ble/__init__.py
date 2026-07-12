@@ -9,8 +9,16 @@ from typing_extensions import Final
 import voluptuous as vol
 
 from homeassistant.components import bluetooth
-from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.const import CONF_ADDRESS, EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import (
+    CoreState,
+    Event,
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import ConfigEntryError, ServiceValidationError
 from homeassistant.helpers.config_validation import config_entry_only_config_schema
 
@@ -26,7 +34,7 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 CONFIG_SCHEMA = config_entry_only_config_schema(DOMAIN)
 SERVICE_ATTEMPT_CONNECT_SCHEMA = vol.Schema({vol.Optional("entry_id"): str})
-REDISCOVERY_MATCHERS = (
+POST_START_REDISCOVERY_MATCHERS = (
     {"local_name": "VEEPEAK*"},
     {"local_name": "Veepeak*"},
     {"local_name": "sps"},
@@ -100,27 +108,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         bluetooth.async_register_callback(
             hass,
             _async_specific_device_found,
-            {"address": entry.unique_id},
+            {"address": entry.data.get(CONF_ADDRESS, entry.unique_id)},
             bluetooth.BluetoothScanningMode.ACTIVE,
         )  # does the register callback, and returns a cancel callback for cleanup
     )
-    configured_address = entry.data.get(CONF_ADDRESS)
-    if configured_address and configured_address != entry.unique_id:
-        entry.async_on_unload(
-            bluetooth.async_register_callback(
-                hass,
-                _async_specific_device_found,
-                {"address": configured_address},
-                bluetooth.BluetoothScanningMode.ACTIVE,
+
+    @callback
+    def _async_register_post_start_rediscovery() -> None:
+        """Register broad rediscovery only after HA startup is complete."""
+        for matcher in POST_START_REDISCOVERY_MATCHERS:
+            entry.async_on_unload(
+                bluetooth.async_register_callback(
+                    hass,
+                    _async_specific_device_found,
+                    matcher,
+                    bluetooth.BluetoothScanningMode.ACTIVE,
+                )
             )
-        )
-    for matcher in REDISCOVERY_MATCHERS:
+
+    @callback
+    def _async_refresh_after_started(_event: Event) -> None:
+        """Wake the coordinator after HA startup has completed."""
+        _async_register_post_start_rediscovery()
+        coordinator.request_refresh_from_bluetooth()
+
+    if hass.state is CoreState.running:
+        _async_register_post_start_rediscovery()
+        coordinator.request_refresh_from_bluetooth()
+    else:
         entry.async_on_unload(
-            bluetooth.async_register_callback(
-                hass,
-                _async_specific_device_found,
-                matcher,
-                bluetooth.BluetoothScanningMode.ACTIVE,
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED,
+                _async_refresh_after_started,
             )
         )
 

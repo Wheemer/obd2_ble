@@ -12,8 +12,8 @@ from obdii.basetypes import MISSING
 from obdii.errors import CanError, MissingDataError, ProtocolConnectionError, ResponseError
 
 from homeassistant.components import bluetooth
-from homeassistant.components.bluetooth.api import async_address_present
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
+from homeassistant.components.bluetooth.api import async_address_present
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS
@@ -229,7 +229,25 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         return local_name in OBD_SERIAL_NAMES and bool(service_uuids & OBD_SERIAL_SERVICE_UUIDS)
 
     def _resolve_ble_address(self, configured_address: str) -> str:
-        """Return the best currently discovered OBD-like BLE address."""
+        """Return the safest BLE address to try.
+
+        During HA startup, stay pinned to the configured address. Once HA is
+        running, allow a temporary OBD-like candidate so rotating BLE addresses
+        can recover, but only a successful ELM connection persists the change.
+        """
+        if self.hass.state is not CoreState.running:
+            self._resolved_address = configured_address
+            return configured_address
+
+        configured_connectable = async_address_present(
+            self.hass,
+            configured_address,
+            connectable=True,
+        )
+        if configured_connectable:
+            self._resolved_address = configured_address
+            return configured_address
+
         discovered = [
             service_info
             for service_info in bluetooth.async_discovered_service_info(self.hass)
@@ -246,59 +264,32 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             return configured_address
 
         configured_info = best_by_address.get(configured_address)
-        configured_present = configured_info is not None or async_address_present(
+        if configured_info is not None and async_address_present(
             self.hass,
             configured_address,
             connectable=False,
-        )
-        configured_connectable = self.api is not None and self.api.is_connected()
-        if not configured_connectable:
-            configured_connectable = async_address_present(
-                self.hass,
-                configured_address,
-                connectable=True,
-            )
-
-        def _candidate_score(
-            service_info: BluetoothServiceInfoBleak,
-        ) -> tuple[bool, int]:
-            return (
-                async_address_present(
-                    self.hass,
-                    service_info.address,
-                    connectable=True,
-                ),
-                service_info.rssi,
-            )
-
-        best_info = max(best_by_address.values(), key=_candidate_score)
-        if configured_info is not None and configured_connectable:
-            best_info = max(
-                (configured_info, best_info),
-                key=_candidate_score,
-            )
-
-        if configured_present and best_info.address == configured_address:
+        ):
             self._resolved_address = configured_address
             return configured_address
 
+        connectable_candidates = [
+            service_info
+            for service_info in best_by_address.values()
+            if async_address_present(self.hass, service_info.address, connectable=True)
+        ]
+        if not connectable_candidates:
+            self._resolved_address = configured_address
+            return configured_address
+
+        best_info = max(connectable_candidates, key=lambda service_info: service_info.rssi)
         if best_info.address != self._resolved_address:
-            if configured_present:
-                _LOGGER.warning(
-                    "Configured OBD2 adapter %s is visible but %s (%s, RSSI=%s) is the better current OBD BLE advertisement",
-                    configured_address,
-                    best_info.address,
-                    best_info.name or best_info.advertisement.local_name,
-                    best_info.rssi,
-                )
-            else:
-                _LOGGER.warning(
-                    "Configured OBD2 adapter %s is missing; using discovered OBD-like adapter %s (%s, RSSI=%s)",
-                    configured_address,
-                    best_info.address,
-                    best_info.name or best_info.advertisement.local_name,
-                    best_info.rssi,
-                )
+            _LOGGER.warning(
+                "Configured OBD2 adapter %s is not connectable; trying discovered OBD-like adapter %s (%s, RSSI=%s) after startup",
+                configured_address,
+                best_info.address,
+                best_info.name or best_info.advertisement.local_name,
+                best_info.rssi,
+            )
         self._resolved_address = best_info.address
         return best_info.address
 
