@@ -129,7 +129,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._last_requested_protocol: Protocol | None = None
         self._last_active_protocol: Protocol | None = None
         self._active_obd_header: str | None = None
+        self._active_ble_address: str | None = None
         self._missing_adapter_retries = 0
+        self._last_bluetooth_refresh_request = 0.0
         self._resolved_address: str = entry.data.get(CONF_ADDRESS, entry.unique_id)
 
         if not entry or not entry.unique_id:
@@ -191,6 +193,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self.api = None
                 self.transport = None
                 self._active_obd_header = None
+                self._active_ble_address = None
 
     def _mark_car_disconnected(self, error: str) -> None:
         """Clear live-car state after an adapter or ECU disconnect."""
@@ -256,11 +259,23 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 connectable=True,
             )
 
-        best_info = max(best_by_address.values(), key=lambda service_info: service_info.rssi)
+        def _candidate_score(
+            service_info: BluetoothServiceInfoBleak,
+        ) -> tuple[bool, int]:
+            return (
+                async_address_present(
+                    self.hass,
+                    service_info.address,
+                    connectable=True,
+                ),
+                service_info.rssi,
+            )
+
+        best_info = max(best_by_address.values(), key=_candidate_score)
         if configured_info is not None and configured_connectable:
             best_info = max(
                 (configured_info, best_info),
-                key=lambda service_info: service_info.rssi,
+                key=_candidate_score,
             )
 
         if configured_present and best_info.address == configured_address:
@@ -330,6 +345,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         self._last_requested_protocol = protocol
         self.api.connect()
+        self._active_ble_address = ble_device.address
         self._active_obd_header = None
         self._last_active_protocol = self.api.protocol
         hw_version = self.api.query(at_commands.VERSION_ID)
@@ -429,6 +445,14 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         configured_address = self._configured_address()
         address = self._resolve_ble_address(configured_address)
         connected = self.api is not None and self.api.is_connected()
+        if self.api is not None and self._active_ble_address != address:
+            _LOGGER.info(
+                "Resolved OBD2 BLE address changed from %s to %s; rebuilding BLE session",
+                self._active_ble_address,
+                address,
+            )
+            await self.hass.async_add_executor_job(self._close_api)
+            connected = False
         present = connected or async_address_present(self.hass, address, connectable=False)
         connectable = connected or async_address_present(self.hass, address, connectable=True)
 
@@ -680,6 +704,14 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     def active_command_count(self) -> int:
         """Return the number of commands currently registered by entities."""
         return len(self.active_commands)
+
+    def request_refresh_from_bluetooth(self) -> None:
+        """Request a refresh from a Bluetooth rediscovery callback with debounce."""
+        now = self.hass.loop.time()
+        if now - self._last_bluetooth_refresh_request < 2:
+            return
+        self._last_bluetooth_refresh_request = now
+        self.hass.async_create_task(self.async_request_refresh())
 
     async def async_force_update(self) -> bool:
         """Force an update of the coordinator data by calling the update method directly."""

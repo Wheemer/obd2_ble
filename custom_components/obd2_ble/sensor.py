@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import CONF_ADDRESS, EntityCategory
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -344,7 +344,7 @@ class ObdBleDiagnosticSensor(CoordinatorEntity[Obd2BleDataUpdateCoordinator], Se
         super().__init__(coordinator)
         self._config = config
         self._attr_device_info = coordinator.device_info
-        self._attr_unique_id = f"{config_entry.data[CONF_ADDRESS]}-diagnostic_sensor-{config.key}"
+        self._attr_unique_id = f"{config_entry.unique_id}-diagnostic_sensor-{config.key}"
         self.entity_description = config.description
 
     def _handle_coordinator_update(self) -> None:

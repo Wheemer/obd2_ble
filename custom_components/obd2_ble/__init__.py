@@ -9,6 +9,7 @@ from typing_extensions import Final
 import voluptuous as vol
 
 from homeassistant.components import bluetooth
+from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ConfigEntryError, ServiceValidationError
 from homeassistant.helpers.config_validation import config_entry_only_config_schema
@@ -25,6 +26,13 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 CONFIG_SCHEMA = config_entry_only_config_schema(DOMAIN)
 SERVICE_ATTEMPT_CONNECT_SCHEMA = vol.Schema({vol.Optional("entry_id"): str})
+REDISCOVERY_MATCHERS = (
+    {"local_name": "VEEPEAK*"},
+    {"local_name": "Veepeak*"},
+    {"local_name": "sps"},
+    {"service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"},
+    {"service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"},
+)
 
 
 async def _async_handle_attempt_to_connect(
@@ -86,9 +94,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
     ) -> None:
         """Handle re-discovery of the device."""
         _LOGGER.debug("New service_info: %s - %s", service_info, change)
-        hass.async_create_task(coordinator.async_request_refresh())
+        coordinator.request_refresh_from_bluetooth()
 
-    # Stuff to do when cleaning up
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,
@@ -97,6 +104,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
             bluetooth.BluetoothScanningMode.ACTIVE,
         )  # does the register callback, and returns a cancel callback for cleanup
     )
+    configured_address = entry.data.get(CONF_ADDRESS)
+    if configured_address and configured_address != entry.unique_id:
+        entry.async_on_unload(
+            bluetooth.async_register_callback(
+                hass,
+                _async_specific_device_found,
+                {"address": configured_address},
+                bluetooth.BluetoothScanningMode.ACTIVE,
+            )
+        )
+    for matcher in REDISCOVERY_MATCHERS:
+        entry.async_on_unload(
+            bluetooth.async_register_callback(
+                hass,
+                _async_specific_device_found,
+                matcher,
+                bluetooth.BluetoothScanningMode.ACTIVE,
+            )
+        )
 
     if not hass.services.has_service(DOMAIN, ACTION_ATTEMPT_CONNECT):
         hass.services.async_register(

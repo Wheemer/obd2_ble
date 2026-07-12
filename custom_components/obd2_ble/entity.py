@@ -2,7 +2,6 @@
 
 import logging
 
-from homeassistant.const import CONF_ADDRESS
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 import obdii
 
@@ -19,7 +18,7 @@ class ObdBleEntity(CoordinatorEntity[Obd2BleDataUpdateCoordinator]):
         super().__init__(coordinator)
         self._command = command
         self._attr_device_info = coordinator.device_info
-        self._attr_unique_id = f"{config_entry.data[CONF_ADDRESS]}-{domain}-{command.name}"
+        self._attr_unique_id = f"{config_entry.unique_id}-{domain}-{command.name}"
 
     async def async_added_to_hass(self):
         """Run when entity is added to register its command."""

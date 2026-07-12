@@ -8,7 +8,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
-from homeassistant.const import CONF_ADDRESS, EntityCategory
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -93,7 +93,7 @@ class ObdBleStatusBinarySensor(
         super().__init__(coordinator)
         self._attr_device_info = coordinator.device_info
         self._attr_unique_id = (
-            f"{config_entry.data[CONF_ADDRESS]}-binary_sensor-{config.function.__name__}"
+            f"{config_entry.unique_id}-binary_sensor-{config.function.__name__}"
         )
         self._config = config
         self.entity_description = config.description
