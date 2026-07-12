@@ -16,6 +16,7 @@ from homeassistant.components.bluetooth.api import async_address_present
 from homeassistant.components.bluetooth import BluetoothServiceInfoBleak
 from homeassistant.components.bluetooth.const import DOMAIN as BLUETOOTH_DOMAIN
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConditionError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
@@ -129,7 +130,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._last_active_protocol: Protocol | None = None
         self._active_obd_header: str | None = None
         self._missing_adapter_retries = 0
-        self._resolved_address: str = entry.unique_id
+        self._resolved_address: str = entry.data.get(CONF_ADDRESS, entry.unique_id)
 
         if not entry or not entry.unique_id:
             raise ConditionError("No unique_id found in config entry")
@@ -147,6 +148,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     def _configured_protocol(self) -> Protocol:
         """Return the user-configured protocol."""
         return Protocol(self.config_entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value))
+
+    def _configured_address(self) -> str:
+        """Return the current configured BLE address."""
+        return self.config_entry.data.get(CONF_ADDRESS, self.config_entry.unique_id)
 
     def _protocol_candidates(self) -> tuple[Protocol, ...]:
         """Return protocol candidates for the current config entry."""
@@ -253,6 +258,21 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             )
         self._resolved_address = fallback.address
         return fallback.address
+
+    async def _async_persist_resolved_address(self, address: str) -> None:
+        """Persist a proven current BLE address without changing stable identity."""
+        if address == self.config_entry.data.get(CONF_ADDRESS):
+            return
+
+        old_address = self.config_entry.data.get(CONF_ADDRESS, self.config_entry.unique_id)
+        data = dict(self.config_entry.data)
+        data[CONF_ADDRESS] = address
+        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
+        _LOGGER.warning(
+            "Updated OBD2 BLE adapter address from %s to %s after successful ELM connection",
+            old_address,
+            address,
+        )
 
     def _connect_ble(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
         """Connect to the BLE device."""
@@ -378,7 +398,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             _LOGGER.error("No config entry available for coordinator")
             return {}
 
-        configured_address = self.config_entry.unique_id
+        configured_address = self._configured_address()
         address = self._resolve_ble_address(configured_address)
         connected = self.api is not None and self.api.is_connected()
         present = connected or async_address_present(self.hass, address, connectable=False)
@@ -439,6 +459,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 connected = await self.hass.async_add_executor_job(
                     self._connect_ble, ble_device, protocol
                 )
+                if connected:
+                    await self._async_persist_resolved_address(address)
             except Exception as err:
                 self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
                 await self.hass.async_add_executor_job(self._close_api)
@@ -598,7 +620,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             return True
         if not self.config_entry or not self.config_entry.unique_id:
             return False
-        address = self.config_entry.unique_id
+        address = self._configured_address()
         address = self._resolve_ble_address(address)
         return async_address_present(self.hass, address, connectable=False)
 
@@ -611,7 +633,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         # The coordinator may close idle GATT sessions while cycling ECU probes.
         # Report whether HA can connect to the adapter, not whether we are
         # holding a GATT connection open at this exact instant.
-        address = self._resolve_ble_address(self.config_entry.unique_id)
+        address = self._resolve_ble_address(self._configured_address())
         return async_address_present(
             self.hass,
             address,
