@@ -46,6 +46,14 @@ COMMAND_ICONS: dict[str, str] = {
     "ENGINE_RUN_TIME": "mdi:timer-outline",
 }
 
+OFFLINE_ZERO_COMMANDS = {
+    "ENGINE_SPEED",
+    "VEHICLE_SPEED",
+    "ENGINE_LOAD",
+    "THROTTLE_POSITION",
+    "ENGINE_RUN_TIME",
+}
+
 
 def propose_icon_from_command(command: Command) -> str:
     """Propose an mdi icon string by checking token suffixes backwards."""
@@ -290,6 +298,16 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
             if self.coordinator.data is None:
                 _LOGGER.debug("No coordinator data available for sensor %s", str(self._command))
                 self._attr_available = False
+                self._attr_native_value = None
+                super()._handle_coordinator_update()
+                return
+            if not self.coordinator.car_connected():
+                if self._command.name in OFFLINE_ZERO_COMMANDS:
+                    self._attr_available = True
+                    self._attr_native_value = 0
+                else:
+                    self._attr_available = False
+                    self._attr_native_value = None
                 super()._handle_coordinator_update()
                 return
             data: Response | None = self.coordinator.data.get(str(self._command))
@@ -297,10 +315,12 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
         except Exception as ex:
             _LOGGER.error(f"Error updating sensor {str(self._command)}: {ex}")
             self._attr_available = False
+            self._attr_native_value = None
         else:
             if data is None:
                 _LOGGER.debug("No data available for sensor %s", str(self._command))
                 self._attr_available = False
+                self._attr_native_value = None
             elif isinstance(data, Response):
                 self._attr_available = True
                 self._attr_native_value = _rounded_native_value(

@@ -226,38 +226,66 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         return local_name in OBD_SERIAL_NAMES and bool(service_uuids & OBD_SERIAL_SERVICE_UUIDS)
 
     def _resolve_ble_address(self, configured_address: str) -> str:
-        """Return the configured address or a single discovered OBD-like fallback."""
-        if async_address_present(self.hass, configured_address, connectable=False):
-            self._resolved_address = configured_address
-            return configured_address
-
-        candidates = [
+        """Return the best currently discovered OBD-like BLE address."""
+        discovered = [
             service_info
             for service_info in bluetooth.async_discovered_service_info(self.hass)
-            if service_info.address != configured_address
-            and self._service_info_matches_obd2(service_info)
+            if self._service_info_matches_obd2(service_info)
         ]
-        deduped = {service_info.address: service_info for service_info in candidates}
-        if len(deduped) != 1:
-            if deduped:
-                _LOGGER.debug(
-                    "Configured OBD2 adapter %s missing; refusing ambiguous fallback candidates: %s",
-                    configured_address,
-                    sorted(deduped),
-                )
+        best_by_address: dict[str, BluetoothServiceInfoBleak] = {}
+        for service_info in discovered:
+            current = best_by_address.get(service_info.address)
+            if current is None or service_info.rssi > current.rssi:
+                best_by_address[service_info.address] = service_info
+
+        if not best_by_address:
             self._resolved_address = configured_address
             return configured_address
 
-        fallback = next(iter(deduped.values()))
-        if fallback.address != self._resolved_address:
-            _LOGGER.warning(
-                "Configured OBD2 adapter %s is missing; using discovered OBD-like adapter %s (%s)",
+        configured_info = best_by_address.get(configured_address)
+        configured_present = configured_info is not None or async_address_present(
+            self.hass,
+            configured_address,
+            connectable=False,
+        )
+        configured_connectable = self.api is not None and self.api.is_connected()
+        if not configured_connectable:
+            configured_connectable = async_address_present(
+                self.hass,
                 configured_address,
-                fallback.address,
-                fallback.name or fallback.advertisement.local_name,
+                connectable=True,
             )
-        self._resolved_address = fallback.address
-        return fallback.address
+
+        best_info = max(best_by_address.values(), key=lambda service_info: service_info.rssi)
+        if configured_info is not None and configured_connectable:
+            best_info = max(
+                (configured_info, best_info),
+                key=lambda service_info: service_info.rssi,
+            )
+
+        if configured_present and best_info.address == configured_address:
+            self._resolved_address = configured_address
+            return configured_address
+
+        if best_info.address != self._resolved_address:
+            if configured_present:
+                _LOGGER.warning(
+                    "Configured OBD2 adapter %s is visible but %s (%s, RSSI=%s) is the better current OBD BLE advertisement",
+                    configured_address,
+                    best_info.address,
+                    best_info.name or best_info.advertisement.local_name,
+                    best_info.rssi,
+                )
+            else:
+                _LOGGER.warning(
+                    "Configured OBD2 adapter %s is missing; using discovered OBD-like adapter %s (%s, RSSI=%s)",
+                    configured_address,
+                    best_info.address,
+                    best_info.name or best_info.advertisement.local_name,
+                    best_info.rssi,
+                )
+        self._resolved_address = best_info.address
+        return best_info.address
 
     async def _async_persist_resolved_address(self, address: str) -> None:
         """Persist a proven current BLE address without changing stable identity."""
