@@ -43,10 +43,12 @@ from .const import (
     CONF_FAST_POLL,
     CONF_SLOW_POLL,
     CONF_XS_POLL,
+    CONF_BLE_TIMEOUT,
     DEFAULT_CACHED_VALUES,
     DEFAULT_FAST_POLL,
     DEFAULT_SLOW_POLL,
     DEFAULT_XS_POLL,
+    DEFAULT_BLE_TIMEOUT,
 
     CONF_COMMANDS,
     CONF_COMMAND,
@@ -375,6 +377,10 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     vol.Required(
                         CONF_XS_POLL, default=self._options.get(CONF_XS_POLL, DEFAULT_XS_POLL)
                     ): int,
+                    vol.Required(
+                        CONF_BLE_TIMEOUT,
+                        default=self._options.get(CONF_BLE_TIMEOUT, DEFAULT_BLE_TIMEOUT),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=4, max=15)),
                 }
             ),
         )

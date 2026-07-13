@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 import logging
+from time import monotonic
 from typing import Any, Iterator
 
 from bleak.backends.device import BLEDevice
@@ -28,6 +29,7 @@ from .const import (
     CONF_HW_VERSION,
     CONF_SLOW_POLL,
     CONF_XS_POLL,
+    CONF_BLE_TIMEOUT,
     CONF_CHARACTERISTIC_UUID_READ,
     CONF_CHARACTERISTIC_UUID_WRITE,
     CONF_PROTOCOL,
@@ -35,6 +37,7 @@ from .const import (
     DEFAULT_FAST_POLL,
     DEFAULT_SLOW_POLL,
     DEFAULT_XS_POLL,
+    DEFAULT_BLE_TIMEOUT,
     DEFAULT_CACHED_VALUES,
     DEFAULT_CHARACTERISTIC_UUID_READ,
     DEFAULT_CHARACTERISTIC_UUID_WRITE,
@@ -59,11 +62,11 @@ ECU_HEALTH_COMMANDS = tuple(
     if command is not None
 )
 AUTO_PROTOCOL_CANDIDATES = (
-    Protocol.AUTO,
     Protocol.ISO_15765_4_CAN,
     Protocol.ISO_15765_4_CAN_B,
     Protocol.ISO_15765_4_CAN_C,
     Protocol.ISO_15765_4_CAN_D,
+    Protocol.AUTO,
     Protocol.ISO_9141_2,
     Protocol.ISO_14230_4_KWP_FAST,
     Protocol.ISO_14230_4_KWP,
@@ -77,6 +80,12 @@ EXPECTED_PROBE_LOGGERS = (
 DEFAULT_FUNCTIONAL_CAN_HEADER = "7DF"
 MISSING_ADAPTER_FAST_RETRIES = 12
 MISSING_ADAPTER_CLOSE_RETRIES = 3
+CONNECT_FAILURE_PROTOCOL_RETRIES = 3
+STATE_STARTUP_DEFERRED = "startup_deferred"
+STATE_ADAPTER_MISSING = "adapter_missing"
+STATE_ADAPTER_VISIBLE = "adapter_visible"
+STATE_BLE_CONNECTED = "ble_connected"
+STATE_ECU_LIVE = "ecu_live"
 
 
 @contextmanager
@@ -117,6 +126,8 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._last_fetch_successful = False
         self.last_successful_update: datetime | None = None
         self.last_error: str | None = None
+        self.last_connect_duration_ms: int | None = None
+        self.connection_state = STATE_STARTUP_DEFERRED
 
         self.transport: TransportBLE | None = None
         self.api: Connection | None = None
@@ -127,6 +138,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._active_obd_header: str | None = None
         self._active_ble_address: str | None = None
         self._ecu_seen = False
+        self._connect_failures = 0
         self._missing_adapter_retries = 0
         self._last_bluetooth_refresh_request = 0.0
         self._resolved_address: str = entry.data.get(CONF_ADDRESS, entry.unique_id)
@@ -202,6 +214,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         """Clear live-car state after an adapter or ECU disconnect."""
         self._last_fetch_successful = False
         self.last_error = error
+
+    def _mark_connection_state(self, state: str) -> None:
+        """Update the coarse connection state diagnostic."""
+        self.connection_state = state
 
     def _missing_adapter_interval(self) -> timedelta:
         """Return retry interval for a missing adapter before long backoff."""
@@ -323,12 +339,15 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             return False
 
         entry_data = dict(self.config_entry.data)
+        timeout = float(
+            self.config_entry.options.get(CONF_BLE_TIMEOUT, DEFAULT_BLE_TIMEOUT)
+        )
 
         self.transport = TransportBLE(
             ble_device=ble_device,
             uuid_write=entry_data.get(CONF_CHARACTERISTIC_UUID_WRITE, DEFAULT_CHARACTERISTIC_UUID_WRITE),
             uuid_read=entry_data.get(CONF_CHARACTERISTIC_UUID_READ, DEFAULT_CHARACTERISTIC_UUID_READ),
-            # timeout=self.config_entry.options.get("timeout", 10.0),
+            timeout=timeout,
             loop = self.hass.loop,
         )
 
@@ -342,16 +361,43 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         )
 
         self._last_requested_protocol = protocol
+        started = monotonic()
         self.api.connect()
+        self.last_connect_duration_ms = int((monotonic() - started) * 1000)
         self._active_ble_address = ble_device.address
         self._active_obd_header = None
         self._last_active_protocol = self.api.protocol
+        _LOGGER.debug(
+            "Connected to OBD2 adapter over BLE in %sms using requested=%s active=%s",
+            self.last_connect_duration_ms,
+            protocol.name,
+            self.api.protocol.name,
+        )
         hw_version = self.api.query(at_commands.VERSION_ID)
         if hw_version is not None:
             entry_data[CONF_HW_VERSION] = hw_version.value if hw_version else None
             self.device_info["hw_version"] = hw_version.value if hw_version else None
 
         return True
+
+    def _persist_successful_protocol(self) -> None:
+        """Persist the working protocol after a real ECU response."""
+        if self.api is None:
+            return
+        active_protocol = self.api.protocol
+        if active_protocol in (Protocol.AUTO, Protocol.UNKNOWN):
+            return
+        if self._configured_protocol() != Protocol.AUTO:
+            return
+
+        data = dict(self.config_entry.data)
+        data[CONF_PROTOCOL] = active_protocol.value
+        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
+        self.device_info["model_id"] = active_protocol.name
+        _LOGGER.warning(
+            "Persisted successful OBD2 protocol %s after ECU health probe",
+            active_protocol.name,
+        )
 
     def _query_command(self, command: Command) -> Response:
         """Query a command while muting noisy expected protocol failures."""
@@ -442,6 +488,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         if self.hass.state is not CoreState.running:
             self._mark_car_disconnected("Home Assistant startup is not complete")
+            self._mark_connection_state(STATE_STARTUP_DEFERRED)
             self.update_interval = None
             _LOGGER.debug("Deferring OBD2 BLE update until Home Assistant startup completes")
             if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
@@ -471,6 +518,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         )
         if not present:
             self._mark_car_disconnected("Bluetooth device is not currently present")
+            self._mark_connection_state(STATE_ADAPTER_MISSING)
             self.update_interval = self._missing_adapter_interval()
             if self._missing_adapter_retries >= MISSING_ADAPTER_CLOSE_RETRIES:
                 await self.hass.async_add_executor_job(self._close_api)
@@ -488,6 +536,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
         if not connectable:
             self._mark_car_disconnected("Bluetooth device is visible but not connectable yet")
+            self._mark_connection_state(STATE_ADAPTER_VISIBLE)
             self.update_interval = self._slow_poll_interval()
             _LOGGER.debug(
                 "Device is visible but not connectable; retrying in %s",
@@ -503,22 +552,28 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             )
             if ble_device is None:
                 self._mark_car_disconnected(f"Failed to discover device {address} via Bluetooth")
-                await self.hass.async_add_executor_job(self._close_api)
+                self._mark_connection_state(STATE_ADAPTER_VISIBLE)
                 self.update_interval = self._slow_poll_interval()
                 _LOGGER.debug(self.last_error)
                 if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
                     return self._cache_data
                 return {}
             protocol = self._current_protocol_candidate()
+            connect_started = monotonic()
             try:
                 _LOGGER.debug("Connecting to OBD2 adapter using protocol candidate %s", protocol.name)
                 connected = await self.hass.async_add_executor_job(
                     self._connect_ble, ble_device, protocol
                 )
             except Exception as err:
+                self.last_connect_duration_ms = int((monotonic() - connect_started) * 1000)
                 self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
+                self._mark_connection_state(STATE_ADAPTER_VISIBLE)
                 await self.hass.async_add_executor_job(self._close_api)
-                self._advance_protocol_candidate()
+                self._connect_failures += 1
+                if self._connect_failures >= CONNECT_FAILURE_PROTOCOL_RETRIES:
+                    self._connect_failures = 0
+                    self._advance_protocol_candidate()
                 self.update_interval = self._slow_poll_interval()
                 _LOGGER.debug(
                     "OBD2 adapter is visible but not responding; retrying in %s: %r",
@@ -530,6 +585,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 return {}
             if not connected:
                 self._mark_car_disconnected("OBD2 adapter did not connect")
+                self._mark_connection_state(STATE_ADAPTER_VISIBLE)
                 await self.hass.async_add_executor_job(self._close_api)
                 self.update_interval = self._slow_poll_interval()
                 return {}
@@ -537,16 +593,23 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         assert self.api is not None, "API should be initialized at this point"
         _LOGGER.debug("Device is available, check if connected")
         if not self.api.is_connected():
+            connect_started = monotonic()
             try:
                 _LOGGER.info("Device is available but not connected, attempt to connect")
                 await self.hass.async_add_executor_job(self.api.connect)
+                self.last_connect_duration_ms = int((monotonic() - connect_started) * 1000)
                 if not self.api.is_connected():
                     raise UpdateFailed("No connection to OBD2 after connect attempt")
             except Exception as err:
+                self.last_connect_duration_ms = int((monotonic() - connect_started) * 1000)
                 self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
-                await self.hass.async_add_executor_job(self._close_api)
-                if self._configured_protocol() == Protocol.AUTO:
-                    self._advance_protocol_candidate()
+                self._mark_connection_state(STATE_ADAPTER_VISIBLE)
+                self._connect_failures += 1
+                if self._connect_failures >= CONNECT_FAILURE_PROTOCOL_RETRIES:
+                    await self.hass.async_add_executor_job(self._close_api)
+                    self._connect_failures = 0
+                    if self._configured_protocol() == Protocol.AUTO:
+                        self._advance_protocol_candidate()
                 self.update_interval = self._slow_poll_interval()
                 _LOGGER.debug(
                     "OBD2 adapter is visible but not responding; retrying in %s: %r",
@@ -558,6 +621,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 return {}
 
         _LOGGER.debug("Device is connected, proceed to query data")
+        self._mark_connection_state(STATE_BLE_CONNECTED)
         try:
             self._last_fetch_successful = False
             new_data: dict[str, Response] = {}
@@ -584,7 +648,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             ecu_detected = ecu_response is not None and ecu_response.value is not None
             if ecu_detected:
                 self._ecu_seen = True
+                self._connect_failures = 0
+                self._mark_connection_state(STATE_ECU_LIVE)
                 self._reset_protocol_candidate()
+                self._persist_successful_protocol()
                 await self._async_persist_resolved_address(address)
             for command in self.active_commands:
                 if command is None:
@@ -614,10 +681,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     self.last_error or "ECU did not respond to OBD2 health probes"
                 )
                 if self._ecu_seen:
+                    self._mark_connection_state(STATE_BLE_CONNECTED)
                     _LOGGER.debug(
                         "ECU did not respond; keeping BLE session open for wake retry"
                     )
                 else:
+                    self._mark_connection_state(STATE_ADAPTER_VISIBLE)
                     await self.hass.async_add_executor_job(self._close_api)
                 if self._configured_protocol() == Protocol.AUTO and not self._ecu_seen:
                     self._advance_protocol_candidate()
@@ -710,6 +779,29 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
     def active_command_count(self) -> int:
         """Return the number of commands currently registered by entities."""
         return len(self.active_commands)
+
+    def connection_state_value(self) -> str:
+        """Return the coarse connection state diagnostic."""
+        return self.connection_state
+
+    def last_connect_duration_ms_value(self) -> int | None:
+        """Return the last BLE connect duration in milliseconds."""
+        return self.last_connect_duration_ms
+
+    def _raw_probe(self, command: str) -> str:
+        """Send a raw ELM command over the active transport and return raw text."""
+        if self.transport is None or not self.transport.is_connected():
+            raise ConnectionError("BLE transport is not connected")
+        normalized = "".join(command.strip().upper().split())
+        if not normalized:
+            raise ValueError("Command must not be empty")
+        self.transport.write_bytes(f"{normalized}\r".encode())
+        response = self.transport.read_bytes()
+        return response.decode(errors="replace").strip()
+
+    async def async_probe_raw(self, command: str) -> str:
+        """Send a raw ELM command over the active connection."""
+        return await self.hass.async_add_executor_job(self._raw_probe, command)
 
     def request_refresh_from_bluetooth(self) -> None:
         """Request a refresh from a Bluetooth rediscovery callback with debounce."""

@@ -262,6 +262,28 @@ async def async_setup_entry(
                 coordinator,
                 entry,
                 Obd2BleDiagnosticSensorEntityConfig(
+                    key="connection_state",
+                    name="Connection state",
+                    value_fn=coordinator.connection_state_value,
+                    icon="mdi:car-connected",
+                ),
+            ),
+            ObdBleDiagnosticSensor(
+                coordinator,
+                entry,
+                Obd2BleDiagnosticSensorEntityConfig(
+                    key="last_connect_duration",
+                    name="Last connect duration",
+                    value_fn=coordinator.last_connect_duration_ms_value,
+                    icon="mdi:timer-outline",
+                    unit="ms",
+                    state_class=SensorStateClass.MEASUREMENT,
+                ),
+            ),
+            ObdBleDiagnosticSensor(
+                coordinator,
+                entry,
+                Obd2BleDiagnosticSensorEntityConfig(
                     key="last_successful_update",
                     name="Last successful update",
                     value_fn=lambda: coordinator.last_successful_update,

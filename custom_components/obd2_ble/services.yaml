@@ -8,3 +8,20 @@ attempt_to_connect:
       required: false
       selector:
         text:
+
+probe_raw:
+  name: Probe Raw OBD Command
+  description: Sends one raw ELM/OBD command over the active OBD2 BLE connection and returns the raw response. Intended for diagnostics and PID discovery.
+  fields:
+    command:
+      name: Command
+      description: Raw ELM command to send, for example AT RV or 22 2201.
+      required: true
+      selector:
+        text:
+    entry_id:
+      name: Config entry ID
+      description: Optional OBD2 BLE config entry ID. Required when multiple OBD2 BLE adapters are configured.
+      required: false
+      selector:
+        text:

@@ -25,6 +25,7 @@ from homeassistant.helpers.config_validation import config_entry_only_config_sch
 from .const import (
     DOMAIN,
     ACTION_ATTEMPT_CONNECT,
+    ACTION_PROBE_RAW,
     PLATFORMS,
     STARTUP_MESSAGE
 )
@@ -35,6 +36,12 @@ _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 CONFIG_SCHEMA = config_entry_only_config_schema(DOMAIN)
 SERVICE_ATTEMPT_CONNECT_SCHEMA = vol.Schema({vol.Optional("entry_id"): str})
+SERVICE_PROBE_RAW_SCHEMA = vol.Schema(
+    {
+        vol.Required("command"): str,
+        vol.Optional("entry_id"): str,
+    }
+)
 POST_START_REDISCOVERY_MATCHERS = tuple(
     matcher
     for obd2_class in AVAILABLE_OBD2_CLASSES
@@ -70,6 +77,38 @@ async def _async_handle_attempt_to_connect(
     except Exception as err:
         raise ServiceValidationError(
             f"Communication failed while targeting the OBD2 device: {err}"
+        ) from err
+
+
+async def _async_handle_probe_raw(
+    hass: HomeAssistant,
+    call: ServiceCall,
+) -> ServiceResponse:
+    """Send one raw ELM command through a configured OBD2 BLE connection."""
+    coordinators: dict[str, Obd2BleDataUpdateCoordinator] = hass.data.get(DOMAIN, {})
+    entry_id = call.data.get("entry_id")
+
+    if entry_id is None:
+        if not coordinators:
+            raise ServiceValidationError("No OBD2 BLE entries are configured.")
+        if len(coordinators) > 1:
+            raise ServiceValidationError(
+                "Provide entry_id when multiple OBD2 BLE entries are configured."
+            )
+        coordinator = next(iter(coordinators.values()))
+    else:
+        coordinator = coordinators.get(entry_id)
+        if coordinator is None:
+            raise ServiceValidationError(f"No OBD2 BLE entry found for entry_id {entry_id}.")
+
+    command = call.data["command"]
+    _LOGGER.info("Firing action 'probe_raw' with command %s", command)
+    try:
+        response = await coordinator.async_probe_raw(command)
+        return {"response": response}
+    except Exception as err:
+        raise ServiceValidationError(
+            f"Raw OBD2 probe failed while targeting the OBD2 device: {err}"
         ) from err
 
 
@@ -145,6 +184,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
             schema=SERVICE_ATTEMPT_CONNECT_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
+    if not hass.services.has_service(DOMAIN, ACTION_PROBE_RAW):
+        hass.services.async_register(
+            domain=DOMAIN,
+            service=ACTION_PROBE_RAW,
+            service_func=lambda call: _async_handle_probe_raw(hass, call),
+            schema=SERVICE_PROBE_RAW_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
     return True
 
 
@@ -159,4 +206,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> 
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         if not hass.data.get(DOMAIN):
             hass.services.async_remove(DOMAIN, ACTION_ATTEMPT_CONNECT)
+            hass.services.async_remove(DOMAIN, ACTION_PROBE_RAW)
     return unloaded

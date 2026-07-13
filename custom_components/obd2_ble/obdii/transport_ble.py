@@ -126,12 +126,53 @@ class TransportBLE(TransportBase):
             BLE_CONNECT_ATTEMPTS,
             self.config["timeout"],
         )
-        self._ble_conn = await establish_connection(
-            BleakClientWithServiceCache,
-            self._ble_device,
-            self._ble_device.name or "Unknown Device",
-            max_attempts=BLE_CONNECT_ATTEMPTS,
-        )
+        last_error: Exception | None = None
+        for attempt in range(1, BLE_CONNECT_ATTEMPTS + 1):
+            attempt_started = monotonic()
+            try:
+                _LOGGER.debug(
+                    "BLE connect attempt %s/%s to %s (%s)",
+                    attempt,
+                    BLE_CONNECT_ATTEMPTS,
+                    self._ble_device.name,
+                    self._ble_device.address,
+                )
+                self._ble_conn = await asyncio.wait_for(
+                    establish_connection(
+                        BleakClientWithServiceCache,
+                        self._ble_device,
+                        self._ble_device.name or "Unknown Device",
+                        max_attempts=1,
+                    ),
+                    timeout=self.config["timeout"],
+                )
+            except Exception as err:
+                last_error = err
+                _LOGGER.debug(
+                    "BLE connect attempt %s/%s to %s (%s) failed after %.0fms: %r",
+                    attempt,
+                    BLE_CONNECT_ATTEMPTS,
+                    self._ble_device.name,
+                    self._ble_device.address,
+                    (monotonic() - attempt_started) * 1000,
+                    err,
+                )
+                if attempt < BLE_CONNECT_ATTEMPTS:
+                    await asyncio.sleep(0.5)
+                continue
+            _LOGGER.debug(
+                "BLE connect attempt %s/%s to %s (%s) succeeded after %.0fms",
+                attempt,
+                BLE_CONNECT_ATTEMPTS,
+                self._ble_device.name,
+                self._ble_device.address,
+                (monotonic() - attempt_started) * 1000,
+            )
+            break
+        else:
+            assert last_error is not None
+            raise last_error
+
         _LOGGER.debug(
             "Connected to BLE device %s (%s) in %.2fs",
             self._ble_device.name,

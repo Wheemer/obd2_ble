@@ -16,6 +16,7 @@ ISSUE_URL = "https://github.com/dala318/obd2_ble/issues"
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 ACTION_ATTEMPT_CONNECT = "attempt_to_connect"
+ACTION_PROBE_RAW = "probe_raw"
 
 # Configuration and options
 CONF_AUTO_CONFIGURE = "auto_configure"
@@ -29,6 +30,7 @@ CONF_CACHED_VALUES = "cached_values"
 CONF_SLOW_POLL = "slow_poll"
 CONF_FAST_POLL = "fast_poll"
 CONF_XS_POLL = "xs_poll"
+CONF_BLE_TIMEOUT = "ble_timeout"
 
 CONF_COMMANDS = "commands"
 CONF_COMMAND = "command"
@@ -57,6 +59,7 @@ DEFAULT_SLOW_POLL = 5
 # when the device disappears from HA Bluetooth, keep probing often enough to
 # recover from flaky/quiet adapters even if a rediscovery callback is missed.
 DEFAULT_XS_POLL = 30
+DEFAULT_BLE_TIMEOUT = 8
 
 ICON_KEYWORDS: Final[dict[str, str]] = {
     # --- Speed & Rotations ---

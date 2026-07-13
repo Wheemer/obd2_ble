@@ -39,6 +39,8 @@ async def async_get_config_entry_diagnostics(
             "ble_reachable": coordinator.ble_reachable(),
             "ble_connected": coordinator.ble_connected(),
             "car_connected": coordinator.car_connected(),
+            "connection_state": coordinator.connection_state_value(),
+            "last_connect_duration_ms": coordinator.last_connect_duration_ms_value(),
             "active_command_count": coordinator.active_command_count(),
             "active_commands": sorted(command.name for command in coordinator.active_commands),
             "polling_interval_seconds": coordinator.update_interval_seconds(),
