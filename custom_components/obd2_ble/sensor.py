@@ -269,6 +269,16 @@ async def async_setup_entry(
                     device_class=SensorDeviceClass.TIMESTAMP,
                 ),
             ),
+            ObdBleDiagnosticSensor(
+                coordinator,
+                entry,
+                Obd2BleDiagnosticSensorEntityConfig(
+                    key="last_error",
+                    name="Last error",
+                    value_fn=lambda: coordinator.last_error,
+                    icon="mdi:alert-circle-outline",
+                ),
+            ),
         ]
     )
     async_add_entities(entities)

@@ -36,6 +36,7 @@ async def async_get_config_entry_diagnostics(
         },
         "coordinator": {
             "ble_found": coordinator.ble_found(),
+            "ble_reachable": coordinator.ble_reachable(),
             "ble_connected": coordinator.ble_connected(),
             "car_connected": coordinator.car_connected(),
             "active_command_count": coordinator.active_command_count(),

@@ -40,15 +40,9 @@ CONF_STATE_CLASS = "state_class"
 DEFAULT_COMMAND_NAMES: Final[tuple[str, ...]] = (
     "ENGINE_SPEED",
     "VEHICLE_SPEED",
-    "ENGINE_LOAD",
-    "THROTTLE_POSITION",
-    "INTAKE_AIR_TEMP",
-    "FUEL_LEVEL",
     "VEHICLE_VOLTAGE",
+    "FUEL_LEVEL",
     "ENGINE_RUN_TIME",
-    "HONDA_ATF_TEMP_2201_TCM_7E1",
-    "HONDA_ATF_TEMP_8220",
-    "HONDA_ATF_TEMP_9023",
 )
 
 # Defaults

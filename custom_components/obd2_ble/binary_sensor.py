@@ -59,6 +59,16 @@ async def async_setup_entry(
                 coordinator,
                 entry,
                 Obd2BleStatusBinarySensorEntityConfig(
+                    function=coordinator.ble_reachable,
+                    name="BLE Reachable",
+                    icon="mdi:bluetooth-connect",
+                    device_class=BinarySensorDeviceClass.CONNECTIVITY,
+                ),
+            ),
+            ObdBleStatusBinarySensor(
+                coordinator,
+                entry,
+                Obd2BleStatusBinarySensorEntityConfig(
                     function=coordinator.ble_connected,
                     name="BLE Connected",
                     icon="mdi:bluetooth",
