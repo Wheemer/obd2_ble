@@ -29,17 +29,16 @@ from .const import (
     STARTUP_MESSAGE
 )
 from .coordinator import Obd2BleDataUpdateCoordinator, Obd2BleConfigEntry
+from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES
 
 _LOGGER: logging.Logger = logging.getLogger(__package__)
 
 CONFIG_SCHEMA = config_entry_only_config_schema(DOMAIN)
 SERVICE_ATTEMPT_CONNECT_SCHEMA = vol.Schema({vol.Optional("entry_id"): str})
-POST_START_REDISCOVERY_MATCHERS = (
-    {"local_name": "VEEPEAK*"},
-    {"local_name": "Veepeak*"},
-    {"local_name": "sps"},
-    {"service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"},
-    {"service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"},
+POST_START_REDISCOVERY_MATCHERS = tuple(
+    matcher
+    for obd2_class in AVAILABLE_OBD2_CLASSES
+    for matcher in obd2_class.matcher_dict_list()
 )
 
 
@@ -104,19 +103,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         _LOGGER.debug("New service_info: %s - %s", service_info, change)
         coordinator.request_refresh_from_bluetooth()
 
-    entry.async_on_unload(
-        bluetooth.async_register_callback(
-            hass,
-            _async_specific_device_found,
-            {"address": entry.data.get(CONF_ADDRESS, entry.unique_id)},
-            bluetooth.BluetoothScanningMode.ACTIVE,
-        )  # does the register callback, and returns a cancel callback for cleanup
-    )
-
     @callback
     def _async_register_post_start_rediscovery() -> None:
-        """Register broad rediscovery only after HA startup is complete."""
-        for matcher in POST_START_REDISCOVERY_MATCHERS:
+        """Register rediscovery only after HA startup is complete."""
+        matchers = (
+            {"address": entry.data.get(CONF_ADDRESS, entry.unique_id)},
+            *POST_START_REDISCOVERY_MATCHERS,
+        )
+        for matcher in matchers:
             entry.async_on_unload(
                 bluetooth.async_register_callback(
                     hass,

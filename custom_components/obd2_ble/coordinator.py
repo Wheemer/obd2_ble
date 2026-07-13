@@ -76,11 +76,6 @@ EXPECTED_PROBE_LOGGERS = (
 )
 DEFAULT_FUNCTIONAL_CAN_HEADER = "7DF"
 MISSING_ADAPTER_FAST_RETRIES = 12
-OBD_SERIAL_SERVICE_UUIDS = {
-    "0000fff0-0000-1000-8000-00805f9b34fb",
-    "0000ffe0-0000-1000-8000-00805f9b34fb",
-}
-OBD_SERIAL_NAMES = {"sps"}
 
 
 @contextmanager
@@ -130,6 +125,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         self._last_active_protocol: Protocol | None = None
         self._active_obd_header: str | None = None
         self._active_ble_address: str | None = None
+        self._ecu_seen = False
         self._missing_adapter_retries = 0
         self._last_bluetooth_refresh_request = 0.0
         self._resolved_address: str = entry.data.get(CONF_ADDRESS, entry.unique_id)
@@ -169,6 +165,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
     def _advance_protocol_candidate(self) -> None:
         """Advance to the next protocol candidate when AUTO probing fails."""
+        if self._ecu_seen:
+            _LOGGER.debug(
+                "Keeping OBD2 protocol pinned to %s after prior ECU success",
+                self._current_protocol_candidate().name,
+            )
+            return
         candidates = self._protocol_candidates()
         if len(candidates) <= 1:
             return
@@ -224,16 +226,14 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         ):
             return True
 
-        local_name = (service_info.name or service_info.advertisement.local_name or "").lower()
-        service_uuids = {uuid.lower() for uuid in service_info.advertisement.service_uuids}
-        return local_name in OBD_SERIAL_NAMES and bool(service_uuids & OBD_SERIAL_SERVICE_UUIDS)
+        return False
 
     def _resolve_ble_address(self, configured_address: str) -> str:
         """Return the safest BLE address to try.
 
         During HA startup, stay pinned to the configured address. Once HA is
         running, allow a temporary OBD-like candidate so rotating BLE addresses
-        can recover, but only a successful ELM connection persists the change.
+        can recover, but only a successful ECU health probe persists the change.
         """
         if self.hass.state is not CoreState.running:
             self._resolved_address = configured_address
@@ -303,7 +303,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         data[CONF_ADDRESS] = address
         self.hass.config_entries.async_update_entry(self.config_entry, data=data)
         _LOGGER.warning(
-            "Updated OBD2 BLE adapter address from %s to %s after successful ELM connection",
+            "Updated OBD2 BLE adapter address from %s to %s after successful ECU health probe",
             old_address,
             address,
         )
@@ -433,6 +433,14 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             _LOGGER.error("No config entry available for coordinator")
             return {}
 
+        if self.hass.state is not CoreState.running:
+            self._mark_car_disconnected("Home Assistant startup is not complete")
+            self.update_interval = None
+            _LOGGER.debug("Deferring OBD2 BLE update until Home Assistant startup completes")
+            if self.config_entry.options.get(CONF_CACHED_VALUES, DEFAULT_CACHED_VALUES):
+                return self._cache_data
+            return {}
+
         configured_address = self._configured_address()
         address = self._resolve_ble_address(configured_address)
         connected = self.api is not None and self.api.is_connected()
@@ -502,8 +510,6 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 connected = await self.hass.async_add_executor_job(
                     self._connect_ble, ble_device, protocol
                 )
-                if connected:
-                    await self._async_persist_resolved_address(address)
             except Exception as err:
                 self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
                 await self.hass.async_add_executor_job(self._close_api)
@@ -578,7 +584,9 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
 
             ecu_detected = ecu_response is not None and ecu_response.value is not None
             if ecu_detected:
+                self._ecu_seen = True
                 self._reset_protocol_candidate()
+                await self._async_persist_resolved_address(address)
             for command in self.active_commands:
                 if command is None:
                     _LOGGER.warning("Skipping invalid command: %s", command)
@@ -606,8 +614,13 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self._mark_car_disconnected(
                     self.last_error or "ECU did not respond to OBD2 health probes"
                 )
-                await self.hass.async_add_executor_job(self._close_api)
-                if self._configured_protocol() == Protocol.AUTO:
+                if self._ecu_seen:
+                    _LOGGER.debug(
+                        "ECU did not respond; keeping BLE session open for wake retry"
+                    )
+                else:
+                    await self.hass.async_add_executor_job(self._close_api)
+                if self._configured_protocol() == Protocol.AUTO and not self._ecu_seen:
                     self._advance_protocol_candidate()
                 self.update_interval = timedelta(seconds=self.config_entry.options.get(CONF_SLOW_POLL, DEFAULT_SLOW_POLL))
                 _LOGGER.debug(
