@@ -88,7 +88,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._discovered_devices: dict[str, BluetoothServiceInfoBleak] = {}
         self._characteristic_uuid_read: str = DEFAULT_CHARACTERISTIC_UUID_READ
         self._characteristic_uuid_write: str = DEFAULT_CHARACTERISTIC_UUID_WRITE
-        self._protocol: int = Protocol.AUTO.value
+        self._protocol: int = Protocol.ISO_15765_4_CAN.value
         self._transport: TransportBLE | None = None
 
     @staticmethod

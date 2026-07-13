@@ -104,10 +104,15 @@ class VeepeakOBD2_BLE(OBD2_BLE):
     @staticmethod
     def matcher_dict_list() -> list[MatcherPattern]:
         """Provide BluetoothMatcher definition for Veepeak OBDCheck BLE/BLE+."""
-        return [{
-            "local_name": "VEEPEAK*",
-            "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
-        }]
+        return [
+            {
+                "local_name": "VEEPEAK*",
+                "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+            },
+            {
+                "local_name": "VEEPEAK*",
+            },
+        ]
 
     @staticmethod
     def uuid_rx() -> str:

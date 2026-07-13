@@ -7,6 +7,7 @@ https://github.com/dala318/obd2_ble
 import logging
 from typing_extensions import Final
 import voluptuous as vol
+from obdii.protocol import Protocol
 
 from homeassistant.components import bluetooth
 from homeassistant.const import CONF_ADDRESS, EVENT_HOMEASSISTANT_STARTED
@@ -26,6 +27,7 @@ from .const import (
     DOMAIN,
     ACTION_ATTEMPT_CONNECT,
     ACTION_PROBE_RAW,
+    CONF_PROTOCOL,
     PLATFORMS,
     STARTUP_MESSAGE
 )
@@ -122,6 +124,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         raise ConfigEntryError(
             translation_domain=DOMAIN,
             translation_key="missing_unique_id",
+        )
+
+    if entry.data.get(CONF_PROTOCOL, Protocol.AUTO.value) == Protocol.AUTO.value:
+        data = dict(entry.data)
+        data[CONF_PROTOCOL] = Protocol.ISO_15765_4_CAN.value
+        hass.config_entries.async_update_entry(entry, data=data)
+        _LOGGER.info(
+            "Migrated OBD2 BLE protocol from AUTO to %s for %s",
+            Protocol.ISO_15765_4_CAN.name,
+            entry.title,
         )
 
     coordinator = Obd2BleDataUpdateCoordinator(

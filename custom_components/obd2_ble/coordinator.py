@@ -303,9 +303,21 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             if async_address_present(self.hass, service_info.address, connectable=True)
         ]
         if not connectable_candidates:
-            self._resolved_address = configured_address
-            self._last_resolved_service_info = configured_info
-            return configured_address
+            best_info = configured_info or max(
+                best_by_address.values(),
+                key=lambda service_info: service_info.rssi,
+            )
+            if best_info.address != self._resolved_address:
+                _LOGGER.info(
+                    "Trying present OBD2 BLE advertisement %s (%s, RSSI=%s) even though HA reports no connectable candidates for configured address %s",
+                    best_info.address,
+                    best_info.name or best_info.advertisement.local_name,
+                    best_info.rssi,
+                    configured_address,
+                )
+            self._resolved_address = best_info.address
+            self._last_resolved_service_info = best_info
+            return best_info.address
 
         best_info = max(connectable_candidates, key=lambda service_info: service_info.rssi)
         if best_info.address != self._resolved_address:
@@ -378,12 +390,11 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             address,
         )
 
-    def _connect_ble(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
-        """Connect to the BLE device."""
+    def _build_api(self, ble_device: BLEDevice, protocol: Protocol) -> None:
+        """Create the transport and OBD API objects for a BLE device."""
 
         if not self.config_entry or not self.config_entry.unique_id:
-            _LOGGER.error("No config entry available for coordinator")
-            return False
+            raise ConnectionError("No config entry available for coordinator")
 
         entry_data = dict(self.config_entry.data)
         timeout = float(
@@ -408,20 +419,43 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         )
 
         self._last_requested_protocol = protocol
+
+    def _connect_ble_transport(self, ble_device: BLEDevice, protocol: Protocol) -> bool:
+        """Open the BLE GATT transport before running ELM initialization."""
+        self._build_api(ble_device, protocol)
+        assert self.transport is not None
+
         started = monotonic()
-        self.api.connect()
+        self.transport.connect()
         self.last_connect_duration_ms = int((monotonic() - started) * 1000)
         self._active_ble_address = ble_device.address
         self._active_obd_header = None
-        self._last_active_protocol = self.api.protocol
         _LOGGER.info(
-            "Connected to OBD2 adapter over BLE in %sms using requested=%s active=%s",
+            "Opened OBD2 BLE GATT transport in %sms using requested=%s",
             self.last_connect_duration_ms,
             protocol.name,
+        )
+        return True
+
+    def _initialize_obd_connection(self) -> bool:
+        """Run ELM initialization after BLE is already connected."""
+        if self.api is None:
+            raise ConnectionError("No OBD2 API connection")
+
+        started = monotonic()
+        self.api._initialize_connection()
+        self.api.init_completed = True
+        self._last_active_protocol = self.api.protocol
+        _LOGGER.info(
+            "Initialized OBD2 adapter in %sms using requested=%s active=%s",
+            int((monotonic() - started) * 1000),
+            self._last_requested_protocol.name if self._last_requested_protocol else None,
             self.api.protocol.name,
         )
+
         hw_version = self.api.query(at_commands.VERSION_ID)
         if hw_version is not None:
+            entry_data = dict(self.config_entry.data)
             entry_data[CONF_HW_VERSION] = hw_version.value if hw_version else None
             self.device_info["hw_version"] = hw_version.value if hw_version else None
 
@@ -603,8 +637,12 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             try:
                 _LOGGER.info("Connecting to OBD2 adapter using protocol candidate %s", protocol.name)
                 connected = await self.hass.async_add_executor_job(
-                    self._connect_ble, ble_device, protocol
+                    self._connect_ble_transport, ble_device, protocol
                 )
+                if connected:
+                    self._mark_connection_state(STATE_BLE_CONNECTED)
+                    self.async_set_updated_data(dict(self.data or {}))
+                    await self.hass.async_add_executor_job(self._initialize_obd_connection)
             except Exception as err:
                 self.last_connect_duration_ms = int((monotonic() - connect_started) * 1000)
                 self._mark_car_disconnected(f"Error connecting with OBD2: {err!r}")
