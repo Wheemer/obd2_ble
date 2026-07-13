@@ -176,11 +176,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
             )
         )
 
+    async def _handle_attempt_to_connect(call: ServiceCall) -> ServiceResponse:
+        return await _async_handle_attempt_to_connect(hass, call)
+
+    async def _handle_probe_raw(call: ServiceCall) -> ServiceResponse:
+        return await _async_handle_probe_raw(hass, call)
+
     if not hass.services.has_service(DOMAIN, ACTION_ATTEMPT_CONNECT):
         hass.services.async_register(
             domain=DOMAIN,
             service=ACTION_ATTEMPT_CONNECT,
-            service_func=lambda call: _async_handle_attempt_to_connect(hass, call),
+            service_func=_handle_attempt_to_connect,
             schema=SERVICE_ATTEMPT_CONNECT_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
@@ -188,7 +194,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
         hass.services.async_register(
             domain=DOMAIN,
             service=ACTION_PROBE_RAW,
-            service_func=lambda call: _async_handle_probe_raw(hass, call),
+            service_func=_handle_probe_raw,
             schema=SERVICE_PROBE_RAW_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )

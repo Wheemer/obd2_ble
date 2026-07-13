@@ -63,13 +63,6 @@ ECU_HEALTH_COMMANDS = tuple(
 )
 AUTO_PROTOCOL_CANDIDATES = (
     Protocol.ISO_15765_4_CAN,
-    Protocol.ISO_15765_4_CAN_B,
-    Protocol.ISO_15765_4_CAN_C,
-    Protocol.ISO_15765_4_CAN_D,
-    Protocol.AUTO,
-    Protocol.ISO_9141_2,
-    Protocol.ISO_14230_4_KWP_FAST,
-    Protocol.ISO_14230_4_KWP,
 )
 EXPECTED_PROBE_LOGGERS = (
     "obdii.protocols.protocol_can",
@@ -563,7 +556,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
         present = connected or async_address_present(self.hass, address, connectable=False)
         connectable = connected or async_address_present(self.hass, address, connectable=True)
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "Bluetooth state for %s: present=%s connectable=%s connected=%s",
             address,
             present,
@@ -620,7 +613,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 self._connect_failures += 1
                 if self._connect_failures >= CONNECT_FAILURE_PROTOCOL_RETRIES:
                     self._connect_failures = 0
-                    self._advance_protocol_candidate()
+                    _LOGGER.info(
+                        "Keeping OBD2 protocol candidate at %s after BLE connect failures",
+                        self._current_protocol_candidate().name,
+                    )
                 self.update_interval = self._slow_poll_interval()
                 _LOGGER.info(
                     "OBD2 adapter is visible but not responding; retrying in %s: %r",
@@ -655,8 +651,10 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if self._connect_failures >= CONNECT_FAILURE_PROTOCOL_RETRIES:
                     await self.hass.async_add_executor_job(self._close_api)
                     self._connect_failures = 0
-                    if self._configured_protocol() == Protocol.AUTO:
-                        self._advance_protocol_candidate()
+                    _LOGGER.info(
+                        "Keeping OBD2 protocol candidate at %s after reconnect failures",
+                        self._current_protocol_candidate().name,
+                    )
                 self.update_interval = self._slow_poll_interval()
                 _LOGGER.debug(
                     "OBD2 adapter is visible but not responding; retrying in %s: %r",
@@ -667,7 +665,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                     return self._cache_data
                 return {}
 
-        _LOGGER.info("OBD2 BLE GATT session is connected; querying ECU data")
+        _LOGGER.debug("OBD2 BLE GATT session is connected; querying ECU data")
         self._mark_connection_state(STATE_BLE_CONNECTED)
         try:
             self._last_fetch_successful = False
@@ -675,7 +673,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
             ecu_command: Command | None = None
             ecu_response: Response | None = None
             try:
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Querying OBD2 health probes over requested=%s active=%s",
                     self._last_requested_protocol.name if self._last_requested_protocol else None,
                     self.api.protocol.name if self.api else None,
@@ -683,7 +681,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 ecu_command, ecu_response = await self.hass.async_add_executor_job(
                     self._query_ecu_health
                 )
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Received health probe response for %s: %s",
                     ecu_command,
                     ecu_response,
@@ -732,7 +730,7 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 if ble_session_connected:
                     self._mark_connection_state(STATE_BLE_CONNECTED)
                     self._ecu_failures += 1
-                    _LOGGER.info(
+                    _LOGGER.debug(
                         "ECU did not respond over healthy BLE session; keeping GATT open for wake retry (failure %s/%s)",
                         self._ecu_failures,
                         CONNECT_FAILURE_PROTOCOL_RETRIES,
@@ -740,19 +738,17 @@ class Obd2BleDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Response]]):
                 else:
                     self._mark_connection_state(STATE_ADAPTER_VISIBLE)
                     await self.hass.async_add_executor_job(self._close_api)
-                if (
-                    self._configured_protocol() == Protocol.AUTO
-                    and not self._ecu_seen
-                    and self._ecu_failures >= CONNECT_FAILURE_PROTOCOL_RETRIES
-                ):
-                    if ble_session_connected:
-                        await self.hass.async_add_executor_job(self._close_api)
-                    self._advance_protocol_candidate()
+                if self._ecu_failures >= CONNECT_FAILURE_PROTOCOL_RETRIES:
+                    _LOGGER.info(
+                        "ECU still has not responded after %s probes; keeping BLE open on protocol %s",
+                        self._ecu_failures,
+                        self._current_protocol_candidate().name,
+                    )
                     self._ecu_failures = 0
                 self.update_interval = timedelta(
                     seconds=self.config_entry.options.get(CONF_FAST_POLL, DEFAULT_FAST_POLL)
                 ) if ble_session_connected else self._slow_poll_interval()
-                _LOGGER.info(
+                _LOGGER.debug(
                     "ECU did not respond; retrying in %s",
                     self.update_interval,
                 )
