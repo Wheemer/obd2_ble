@@ -53,11 +53,14 @@ class TransportBLE(TransportBase):
     def __repr__(self) -> str:
         return f"<TransportBLE {self._ble_device}>"
 
-    def _run_coro(self, coro: Coroutine) -> Any:
+    def _run_coro(self, coro: Coroutine, timeout: float | None = None) -> Any:
         if self._loop is None:
             raise RuntimeError("Event loop is not running.")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=self.config["timeout"])
+        return future.result(timeout=timeout or self.config["timeout"])
+
+    def _connect_timeout(self) -> float:
+        return (float(self.config["timeout"]) * BLE_CONNECT_ATTEMPTS) + 5.0
     
     def _notify_callback(self, _, data: bytearray) -> None:
         with self._lock:
@@ -119,18 +122,19 @@ class TransportBLE(TransportBase):
 
     async def async_connect(self) -> None:
         started = monotonic()
-        _LOGGER.debug(
-            "Attempting to connect to BLE device %s (%s), attempts=%s timeout=%ss",
+        _LOGGER.info(
+            "Attempting BLE connect to %s (%s), attempts=%s per_attempt_timeout=%ss total_wrapper_timeout=%ss",
             self._ble_device.name,
             self._ble_device.address,
             BLE_CONNECT_ATTEMPTS,
             self.config["timeout"],
+            self._connect_timeout(),
         )
         last_error: Exception | None = None
         for attempt in range(1, BLE_CONNECT_ATTEMPTS + 1):
             attempt_started = monotonic()
             try:
-                _LOGGER.debug(
+                _LOGGER.info(
                     "BLE connect attempt %s/%s to %s (%s)",
                     attempt,
                     BLE_CONNECT_ATTEMPTS,
@@ -148,7 +152,7 @@ class TransportBLE(TransportBase):
                 )
             except Exception as err:
                 last_error = err
-                _LOGGER.debug(
+                _LOGGER.info(
                     "BLE connect attempt %s/%s to %s (%s) failed after %.0fms: %r",
                     attempt,
                     BLE_CONNECT_ATTEMPTS,
@@ -160,7 +164,7 @@ class TransportBLE(TransportBase):
                 if attempt < BLE_CONNECT_ATTEMPTS:
                     await asyncio.sleep(0.5)
                 continue
-            _LOGGER.debug(
+            _LOGGER.info(
                 "BLE connect attempt %s/%s to %s (%s) succeeded after %.0fms",
                 attempt,
                 BLE_CONNECT_ATTEMPTS,
@@ -173,7 +177,7 @@ class TransportBLE(TransportBase):
             assert last_error is not None
             raise last_error
 
-        _LOGGER.debug(
+        _LOGGER.info(
             "Connected to BLE device %s (%s) in %.2fs",
             self._ble_device.name,
             self._ble_device.address,
@@ -220,7 +224,7 @@ class TransportBLE(TransportBase):
             self._loop = loop
 
         try:
-            self._run_coro(self.async_connect())
+            self._run_coro(self.async_connect(), timeout=self._connect_timeout())
         except Exception:
             self.close() # Cleanup on failure
             raise
@@ -243,7 +247,7 @@ class TransportBLE(TransportBase):
         with self._lock:
             self._buffer.clear()
         self._data_ready.clear()
-        self._run_coro(self._write(query))
+        self._run_coro(self._write(query), timeout=self.config["timeout"])
 
     def read_bytes(self, expected_seq: bytes = b'>', size: int = MISSING) -> bytes:
         lenterm = len(expected_seq)

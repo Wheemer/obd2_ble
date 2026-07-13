@@ -163,11 +163,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: Obd2BleConfigEntry) -> b
     def _async_refresh_after_started(_event: Event) -> None:
         """Wake the coordinator after HA startup has completed."""
         _async_register_post_start_rediscovery()
-        coordinator.request_refresh_from_bluetooth()
+        coordinator.request_refresh_after_setup()
 
     if hass.state is CoreState.running:
         _async_register_post_start_rediscovery()
-        coordinator.request_refresh_from_bluetooth()
+        coordinator.request_refresh_after_setup()
     else:
         entry.async_on_unload(
             hass.bus.async_listen_once(

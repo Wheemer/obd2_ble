@@ -342,8 +342,8 @@ class ObdBleSensor(ObdBleEntity, SensorEntity):
                     self._attr_native_value = None
                 super()._handle_coordinator_update()
                 return
-            data: Response | None = self.coordinator.data.get(str(self._command))
-            _LOGGER.debug("Updating sensor %s with data: %s", str(self._command), data)
+            data: Response | None = self.coordinator.data.get(self._command.name)
+            _LOGGER.debug("Updating sensor %s with data: %s", self._command.name, data)
         except Exception as ex:
             _LOGGER.error(f"Error updating sensor {str(self._command)}: {ex}")
             self._attr_available = False
