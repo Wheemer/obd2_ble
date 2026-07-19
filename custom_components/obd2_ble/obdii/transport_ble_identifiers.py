@@ -21,7 +21,7 @@ class BaseOBD2(ABC):
     @staticmethod
     @abstractmethod
     def matcher_dict_list() -> list[MatcherPattern]:
-        """Return a list of Bluetooth advertisement matchers."""
+        """Return alternative Bluetooth advertisement matchers (OR)."""
 
     @staticmethod
     @abstractmethod
@@ -35,13 +35,21 @@ class BaseOBD2(ABC):
 
 
 class OBD2_BLE(BaseOBD2):
+    """Generic ELM-style BLE OBD adapters using the common FFF0 service."""
+
     @staticmethod
     def matcher_dict_list() -> list[MatcherPattern]:
-        """Provide BluetoothMatcher definition."""
-        return [{
-            "local_name": "OBDII",
-            "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"
-        }]
+        """Provide BluetoothMatcher definitions (any one match is enough)."""
+        return [
+            {"local_name": "OBDII*"},
+            {"local_name": "OBD2*"},
+            {"local_name": "OBD*"},
+            {"local_name": "VEEPEAK*"},
+            {"local_name": "Vgate*"},
+            {"local_name": "OBDBLE*"},
+            {"service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb"},
+            {"service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"},
+        ]
 
     @staticmethod
     def uuid_rx() -> str:
@@ -52,14 +60,21 @@ class OBD2_BLE(BaseOBD2):
         return "0000fff2-0000-1000-8000-00805f9b34fb"
 
 
-class VlinkOBD2_BLE(OBD2_BLE):
+class VlinkOBD2_BLE(BaseOBD2):
     @staticmethod
     def matcher_dict_list() -> list[MatcherPattern]:
         """Provide BluetoothMatcher definition."""
-        return [{
-            "local_name": "Vlink*",
-            "service_uuid": "000018f0-0000-1000-8000-00805f9b34fb"
-        }]
+        return [
+            {
+                "local_name": "Vlink*",
+                "service_uuid": "000018f0-0000-1000-8000-00805f9b34fb",
+            },
+            {
+                "local_name": "IOS-Vlink*",
+                "service_uuid": "000018f0-0000-1000-8000-00805f9b34fb",
+            },
+            {"service_uuid": "000018f0-0000-1000-8000-00805f9b34fb"},
+        ]
 
     @staticmethod
     def uuid_rx() -> str:
@@ -69,7 +84,9 @@ class VlinkOBD2_BLE(OBD2_BLE):
     def uuid_tx() -> str:
         return "000018f2-0000-1000-8000-00805f9b34fb"
 
+
 AVAILABLE_OBD2_CLASSES: list[type[BaseOBD2]] = [OBD2_BLE, VlinkOBD2_BLE]
+
 
 def advertisement_matches(
     matcher: MatcherPattern,

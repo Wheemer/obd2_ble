@@ -3,10 +3,28 @@
   "name": "OBD2 BLE",
   "bluetooth": [
     {
-      "local_name": "OBD2"
+      "local_name": "OBD2*"
     },
     {
-      "local_name": "OBDII"
+      "local_name": "OBDII*"
+    },
+    {
+      "local_name": "OBD*"
+    },
+    {
+      "local_name": "VEEPEAK*"
+    },
+    {
+      "local_name": "Vgate*"
+    },
+    {
+      "local_name": "OBDBLE*"
+    },
+    {
+      "local_name": "Vlink*"
+    },
+    {
+      "local_name": "IOS-Vlink*"
     },
     {
       "service_uuid": "0000ffe0-0000-1000-8000-00805f9b34fb"
