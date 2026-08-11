@@ -57,7 +57,7 @@ from .const import (
 )
 from .obdii.transport_ble import TransportBLE
 from .obdii.transport_ble_identifiers import AVAILABLE_OBD2_CLASSES, BaseOBD2, advertisement_matches
-from .enhanced_commands import available_enhanced_commands, command_label, get_command
+from .enhanced_commands import command_label, ext_commands
 from .sensor import get_list_of_units, propose_icon_from_command, propose_sensor_device_class, propose_sensor_state_class
 
 _LOGGER = logging.getLogger(__name__)
@@ -371,7 +371,7 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 )
 
             # Save the list of target objects we want to configure sequentially
-            self._selected_commands = [get_command(cmd) for cmd in user_input[CONF_COMMANDS]]
+            self._selected_commands = [ext_commands[cmd] for cmd in user_input[CONF_COMMANDS]]
             self._configured_commands = [] # Reset our configuration queue storage
             return await self.async_step_commands_config()
 
@@ -383,10 +383,10 @@ class Obd2BleOptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if pre_configured := self._options.get(CONF_COMMANDS):
             for cmd in pre_configured:
                 try:
-                    commands.append(get_command(cmd[CONF_COMMAND]))
+                    commands.append(ext_commands[cmd[CONF_COMMAND]])
                 except KeyError:
                     _LOGGER.warning("Configured command %s is no longer available", cmd[CONF_COMMAND])
-        commands = list(set(commands) | set(available_enhanced_commands()))
+        commands = list(set(commands) | set(ext_commands))
         commands = sorted(commands, key=lambda cmd: (cmd.name, cmd.mode, cmd.pid))
 
         return self.async_show_form(
